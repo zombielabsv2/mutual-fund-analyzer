@@ -1220,27 +1220,35 @@ with tab_pms:
 
     if pms_view == "PMS Strategies":
         # --- PMS Data ---
+        # Data sourced from pmsaifworld.com, pmsbazaar.com, provider websites (Mar 2026)
+        # SI CAGR = Since Inception CAGR (TWRR). Verify with latest factsheets.
         pms_data = [
-            {"Provider": "SageOne", "Strategy": "Small Cap Portfolio (SSP)", "Approach": "Small & Micro Cap", "Inception": 2017, "SI CAGR %": 40.2, "Fee Model": "13.75% profit share, no fixed fee", "AUM (₹ Cr)": 3261},
-            {"Provider": "Carnelian", "Strategy": "Shift Strategy", "Approach": "Mid & Small Cap", "Inception": 2020, "SI CAGR %": 37.6, "Fee Model": "2.5% + 15-20% > 8% hurdle", "AUM (₹ Cr)": 9667},
-            {"Provider": "SageOne", "Strategy": "Core Portfolio (SCP)", "Approach": "Mid & Small Cap", "Inception": 2012, "SI CAGR %": 29.0, "Fee Model": "13.75% profit share", "AUM (₹ Cr)": 3261},
-            {"Provider": "White Oak", "Strategy": "India Pioneers Equity", "Approach": "Multicap", "Inception": 2018, "SI CAGR %": 25.7, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 5457},
-            {"Provider": "Unifi", "Strategy": "Blended Rangoli", "Approach": "Multi-Strategy", "Inception": 2017, "SI CAGR %": 23.5, "Fee Model": "2% + 1.5% variable", "AUM (₹ Cr)": 20934},
-            {"Provider": "Unifi", "Strategy": "BCAD", "Approach": "Multi-Strategy", "Inception": 2018, "SI CAGR %": 23.4, "Fee Model": "2% + 1.5% variable", "AUM (₹ Cr)": 20934},
-            {"Provider": "Unifi", "Strategy": "HoldCo", "Approach": "Holding Co Discount", "Inception": 2014, "SI CAGR %": 20.5, "Fee Model": "2% + 1.5% variable", "AUM (₹ Cr)": 20934},
-            {"Provider": "Alchemy", "Strategy": "High Growth", "Approach": "Flexicap", "Inception": 2002, "SI CAGR %": 19.9, "Fee Model": "2.5% + 15-20% > 8-10% hurdle", "AUM (₹ Cr)": 957},
-            {"Provider": "Marcellus", "Strategy": "Consistent Compounders", "Approach": "Large Cap Quality", "Inception": 2018, "SI CAGR %": 18.6, "Fee Model": "0% + 20% > 8% hurdle (or 1% + 15%)", "AUM (₹ Cr)": 2476},
-            {"Provider": "ASK", "Strategy": "Growth Portfolio", "Approach": "Multicap", "Inception": 2001, "SI CAGR %": 17.4, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 26869},
-            {"Provider": "Ambit", "Strategy": "Coffee Can Portfolio", "Approach": "Large Cap Quality", "Inception": 2017, "SI CAGR %": 16.5, "Fee Model": "2.5% + 15% profit share", "AUM (₹ Cr)": 1700},
-            {"Provider": "ASK", "Strategy": "Indian Entrepreneur (IEP)", "Approach": "Multicap", "Inception": 2010, "SI CAGR %": 15.8, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 26869},
-            {"Provider": "Motilal Oswal", "Strategy": "NTDOP", "Approach": "Multicap", "Inception": 2003, "SI CAGR %": 15.4, "Fee Model": "2.5% + 20% > 8% hurdle", "AUM (₹ Cr)": 14483},
-            {"Provider": "Marcellus", "Strategy": "Kings of Capital", "Approach": "Financial Sector", "Inception": 2020, "SI CAGR %": 10.5, "Fee Model": "2.5% fixed, 10% hurdle", "AUM (₹ Cr)": 205},
-            {"Provider": "Motilal Oswal", "Strategy": "IOP", "Approach": "Small & Mid Cap", "Inception": 2010, "SI CAGR %": 9.1, "Fee Model": "2.5% + 20% > 8% hurdle", "AUM (₹ Cr)": 14483},
-            {"Provider": "360 ONE", "Strategy": "Multicap PMS", "Approach": "Multicap + Hedging", "Inception": 2013, "SI CAGR %": 20.0, "Fee Model": "2.5% fixed (tiered by AUM)", "AUM (₹ Cr)": 3085},
-            {"Provider": "Invesco", "Strategy": "DAWN / RISE", "Approach": "Multi-Strategy", "Inception": 2016, "SI CAGR %": None, "Fee Model": "Flat 10% profit share (lowest in industry)", "AUM (₹ Cr)": 20178},
-            {"Provider": "Valentis", "Strategy": "Rising Star Opportunity", "Approach": "Small Cap", "Inception": 2016, "SI CAGR %": None, "Fee Model": "2.5% + 15% > 10% hurdle", "AUM (₹ Cr)": 1685},
-            {"Provider": "Kotak", "Strategy": "Special Situations Value", "Approach": "Special Situations", "Inception": None, "SI CAGR %": None, "Fee Model": "2.5% or 1.5% + 15% > 10%", "AUM (₹ Cr)": 1767},
-            {"Provider": "Nippon India", "Strategy": "Emerging India", "Approach": "Mid Cap", "Inception": 2017, "SI CAGR %": None, "Fee Model": "2.5% fixed, no performance fee", "AUM (₹ Cr)": None},
+            {"Provider": "Carnelian", "Strategy": "Shift Strategy", "Approach": "Mid & Small Cap", "Inception": 2020, "SI CAGR %": 36.0, "5Y CAGR %": None, "3Y CAGR %": 29.3, "Fee Model": "2.5% + 15-20% > 8% hurdle", "AUM (₹ Cr)": 4400},
+            {"Provider": "Stallion Asset", "Strategy": "Core Fund", "Approach": "Multicap", "Inception": 2018, "SI CAGR %": 29.9, "5Y CAGR %": 33.4, "3Y CAGR %": 37.4, "Fee Model": "1% + 15% > 10% hurdle", "AUM (₹ Cr)": 5915},
+            {"Provider": "Abakkus", "Strategy": "Emerging Opportunities", "Approach": "Mid & Small Cap", "Inception": 2018, "SI CAGR %": 30.3, "5Y CAGR %": None, "3Y CAGR %": 24.4, "Fee Model": "1.5% + 20% > 10% hurdle", "AUM (₹ Cr)": 5382},
+            {"Provider": "Wallfort", "Strategy": "Diversified Fund", "Approach": "Multicap", "Inception": 2020, "SI CAGR %": 28.7, "5Y CAGR %": None, "3Y CAGR %": 32.6, "Fee Model": "2% + 20% > 10% hurdle", "AUM (₹ Cr)": 406},
+            {"Provider": "SageOne", "Strategy": "Core Portfolio (SCP)", "Approach": "Multicap", "Inception": 2012, "SI CAGR %": 26.3, "5Y CAGR %": 26.6, "3Y CAGR %": 22.7, "Fee Model": "13.75% profit share, no fixed fee", "AUM (₹ Cr)": 4320},
+            {"Provider": "Green Lantern", "Strategy": "Growth Fund", "Approach": "Mid & Small Cap", "Inception": 2018, "SI CAGR %": 24.0, "5Y CAGR %": 48.8, "3Y CAGR %": 40.2, "Fee Model": "2.5% + 20% > 10% hurdle", "AUM (₹ Cr)": 1139},
+            {"Provider": "Equitree", "Strategy": "Emerging Opportunities", "Approach": "Small & Micro Cap", "Inception": 2017, "SI CAGR %": 23.0, "5Y CAGR %": 43.0, "3Y CAGR %": None, "Fee Model": "2% + 20% on portfolio doubling/5yr", "AUM (₹ Cr)": 1123},
+            {"Provider": "Sameeksha", "Strategy": "Equity Fund", "Approach": "Multicap", "Inception": 2015, "SI CAGR %": 22.2, "5Y CAGR %": 29.1, "3Y CAGR %": 26.8, "Fee Model": "1.5% + 20% > 10% hurdle", "AUM (₹ Cr)": 1112},
+            {"Provider": "Alchemy", "Strategy": "High Growth", "Approach": "Flexicap", "Inception": 2002, "SI CAGR %": 19.9, "5Y CAGR %": 12.4, "3Y CAGR %": 21.0, "Fee Model": "2.5% + 15-20% > 8-10% hurdle", "AUM (₹ Cr)": 957},
+            {"Provider": "2Point2 Capital", "Strategy": "Long Term Value", "Approach": "Concentrated Value", "Inception": 2016, "SI CAGR %": 19.7, "5Y CAGR %": 19.1, "3Y CAGR %": 24.7, "Fee Model": "Value-oriented, max 15 stocks", "AUM (₹ Cr)": 1816},
+            {"Provider": "ICICI Pru PMS", "Strategy": "Contra Strategy", "Approach": "Multicap Contra", "Inception": 2006, "SI CAGR %": 19.6, "5Y CAGR %": 26.7, "3Y CAGR %": 21.8, "Fee Model": "2.5% fixed or 1% + 20%", "AUM (₹ Cr)": None},
+            {"Provider": "Marcellus", "Strategy": "Consistent Compounders", "Approach": "Large Cap Quality", "Inception": 2018, "SI CAGR %": 18.6, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "0% + 20% > 8% (or 1% + 15% > 12%)", "AUM (₹ Cr)": 2476},
+            {"Provider": "Negen Capital", "Strategy": "Special Situations", "Approach": "Multicap", "Inception": 2017, "SI CAGR %": 18.6, "5Y CAGR %": 37.5, "3Y CAGR %": 24.3, "Fee Model": "2% + 20% > 10% hurdle", "AUM (₹ Cr)": 1196},
+            {"Provider": "ASK", "Strategy": "Growth Portfolio", "Approach": "Multicap", "Inception": 2001, "SI CAGR %": 17.4, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 26869},
+            {"Provider": "Ambit", "Strategy": "Coffee Can Portfolio", "Approach": "Large Cap Quality", "Inception": 2017, "SI CAGR %": 16.5, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% + 15% profit share", "AUM (₹ Cr)": 1700},
+            {"Provider": "ASK", "Strategy": "Indian Entrepreneur (IEP)", "Approach": "Multicap", "Inception": 2010, "SI CAGR %": 15.8, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 26869},
+            {"Provider": "Renaissance", "Strategy": "India Next Portfolio", "Approach": "Multicap", "Inception": 2014, "SI CAGR %": 15.5, "5Y CAGR %": 33.3, "3Y CAGR %": 20.2, "Fee Model": "2% + 20% > 10% hurdle", "AUM (₹ Cr)": 892},
+            {"Provider": "Motilal Oswal", "Strategy": "NTDOP", "Approach": "Multicap", "Inception": 2003, "SI CAGR %": 15.4, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% + 20% > 8% hurdle", "AUM (₹ Cr)": 14483},
+            {"Provider": "Buoyant Capital", "Strategy": "Opportunities Multicap", "Approach": "Multicap", "Inception": 2016, "SI CAGR %": 15.0, "5Y CAGR %": 37.7, "3Y CAGR %": None, "Fee Model": "Target 15% CAGR, 18-25 stocks", "AUM (₹ Cr)": None},
+            {"Provider": "White Oak", "Strategy": "India Pioneers Equity", "Approach": "Multicap", "Inception": 2018, "SI CAGR %": None, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 5457},
+            {"Provider": "Unifi", "Strategy": "BCAD", "Approach": "Multi-Strategy", "Inception": 2018, "SI CAGR %": None, "5Y CAGR %": 22.2, "3Y CAGR %": 24.5, "Fee Model": "2% + 1.5% variable", "AUM (₹ Cr)": 20934},
+            {"Provider": "360 ONE", "Strategy": "Multicap PMS", "Approach": "Multicap + Hedging", "Inception": 2013, "SI CAGR %": None, "5Y CAGR %": 20.0, "3Y CAGR %": 19.8, "Fee Model": "2.5% fixed (tiered by AUM)", "AUM (₹ Cr)": 3085},
+            {"Provider": "Marcellus", "Strategy": "Kings of Capital", "Approach": "Financial Sector", "Inception": 2020, "SI CAGR %": 10.5, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% fixed, 10% hurdle", "AUM (₹ Cr)": 205},
+            {"Provider": "Invesco", "Strategy": "DAWN / RISE", "Approach": "Multi-Strategy", "Inception": 2016, "SI CAGR %": None, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "Flat 10% profit share (lowest in industry)", "AUM (₹ Cr)": 20178},
+            {"Provider": "Valentis", "Strategy": "Rising Star Opportunity", "Approach": "Small Cap", "Inception": 2016, "SI CAGR %": None, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% + 15% > 10% hurdle", "AUM (₹ Cr)": 1685},
+            {"Provider": "Kotak", "Strategy": "Special Situations Value", "Approach": "Special Situations", "Inception": None, "SI CAGR %": None, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% or 1.5% + 15% > 10%", "AUM (₹ Cr)": 1767},
         ]
 
         df_pms = pd.DataFrame(pms_data)
@@ -1263,6 +1271,8 @@ with tab_pms:
 
         st.dataframe(filtered, use_container_width=True, column_config={
             'SI CAGR %': st.column_config.NumberColumn(format="%.1f"),
+            '5Y CAGR %': st.column_config.NumberColumn(format="%.1f"),
+            '3Y CAGR %': st.column_config.NumberColumn(format="%.1f"),
             'AUM (₹ Cr)': st.column_config.NumberColumn(format="%,.0f"),
         })
 
@@ -1275,7 +1285,7 @@ with tab_pms:
             c3.metric("Top Performer", f"{has_cagr.iloc[0]['Provider']} {has_cagr.iloc[0]['Strategy']}"[:30])
             c4.metric("Min Investment", "₹50 Lakh")
 
-        st.info("**Note:** Since Inception (SI) CAGR varies by measurement date. Longer track records (Alchemy 2002, ASK 2001, Motilal 2003) are more meaningful than newer strategies. Returns are pre-tax and gross of exit loads.")
+        st.warning("**Data reliability:** Returns sourced from [PMS AIF World](https://www.pmsaifworld.com/pms/best-pms-in-india/), [PMSBazaar](https://pmsbazaar.com/PMSRanking), and provider websites. SI CAGR is Time-Weighted (TWRR) and varies by measurement date. Longer track records (Alchemy 2002, ASK 2001, Motilal 2003) are more meaningful. **Always verify with the latest official factsheet before investing.** Returns shown are pre-tax and net of fees unless stated otherwise.")
 
     elif pms_view == "AIF Category III":
         aif_data = [
