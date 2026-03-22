@@ -194,6 +194,16 @@ def normalize_category(scheme_category):
     if not scheme_category:
         return "Other"
     cat = scheme_category.lower()
+    # Non-equity categories first (must check before equity keywords)
+    if "hybrid" in cat or "arbitrage" in cat or "multi asset" in cat or "balanced" in cat or "equity savings" in cat or "conservative" in cat:
+        return "Hybrid"
+    if "debt" in cat or "bond" in cat or "gilt" in cat or "liquid" in cat or "money market" in cat or "overnight" in cat or "duration" in cat or "credit" in cat or "income" in cat or "floating" in cat:
+        return "Debt"
+    if "gold" in cat or "silver" in cat or "commodit" in cat:
+        return "Commodities"
+    if "fof" in cat or "fund of fund" in cat or "international" in cat:
+        return "International / FoF"
+    # Equity categories
     if "large cap" in cat and "mid" not in cat:
         return "Large Cap"
     if "large" in cat and "mid" in cat:
@@ -216,8 +226,6 @@ def normalize_category(scheme_category):
         return "Sectoral / Thematic"
     if "index" in cat or "nifty" in cat or "sensex" in cat:
         return "Index Fund"
-    if "hybrid" in cat:
-        return "Hybrid"
     return "Other"
 
 

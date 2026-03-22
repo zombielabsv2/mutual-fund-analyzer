@@ -117,6 +117,16 @@ def normalize_category(scheme_category):
     if not scheme_category:
         return "Other"
     cat = scheme_category.lower()
+    # Non-equity categories first (must check before equity keywords)
+    if "hybrid" in cat or "arbitrage" in cat or "multi asset" in cat or "balanced" in cat or "equity savings" in cat or "conservative" in cat:
+        return "Hybrid"
+    if "debt" in cat or "bond" in cat or "gilt" in cat or "liquid" in cat or "money market" in cat or "overnight" in cat or "duration" in cat or "credit" in cat or "income" in cat or "floating" in cat:
+        return "Debt"
+    if "gold" in cat or "silver" in cat or "commodit" in cat:
+        return "Commodities"
+    if "fof" in cat or "fund of fund" in cat or "international" in cat:
+        return "International / FoF"
+    # Equity categories
     if "large cap" in cat and "mid" not in cat:
         return "Large Cap"
     if "large" in cat and "mid" in cat:
@@ -139,8 +149,6 @@ def normalize_category(scheme_category):
         return "Sectoral / Thematic"
     if "index" in cat or "nifty" in cat or "sensex" in cat:
         return "Index Fund"
-    if "hybrid" in cat:
-        return "Hybrid"
     return "Other"
 
 
@@ -791,8 +799,12 @@ with tab_portfolio:
             cat_funds = rankings_by_cat.get(cat, [])
             fund_name = fund['schemeName'].split(' -')[0].split(' Direct')[0]
 
-            if not cat_funds:
-                st.warning(f"**{fund_name}** — No ranked funds in **{cat}** for comparison.")
+            # Skip non-equity categories — our rankings are equity-only
+            non_equity = {"Hybrid", "Debt", "Commodities", "International / FoF", "Other"}
+            if cat in non_equity or not cat_funds:
+                already_optimal += 1
+                health_scores.append(1.0)  # don't penalize non-equity holdings
+                st.info(f"**ℹ️ {fund_name}** — **{cat}** fund. Our rankings cover domestic equity funds only, so no like-for-like comparison available.")
                 continue
 
             top_fund = cat_funds[0]
