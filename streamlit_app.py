@@ -808,9 +808,15 @@ with tab_portfolio:
             health = min(fund['robustnessScore'] / top_fund['robustnessScore'], 1.0) if top_fund['robustnessScore'] > 0 else 0
             health_scores.append(health)
 
-            if fund_rank and fund_rank <= 3:
+            # Only recommend swap if the top fund is actually better
+            is_optimal = (fund_rank and fund_rank <= 3) or top_fund['robustnessScore'] <= fund['robustnessScore']
+
+            if is_optimal:
                 already_optimal += 1
-                st.success(f"**✅ {fund_name}** — Ranked **#{fund_rank} in {cat}**. No change needed. (Robustness: {fund['robustnessScore']})")
+                if fund_rank and fund_rank <= 3:
+                    st.success(f"**✅ {fund_name}** — Ranked **#{fund_rank} in {cat}**. No change needed. (Robustness: {fund['robustnessScore']})")
+                else:
+                    st.success(f"**✅ {fund_name}** — Already outperforms the top ranked fund in **{cat}**. (Robustness: {fund['robustnessScore']} vs {top_fund['robustnessScore']})")
             else:
                 swaps_needed += 1
                 top_name = top_fund['schemeName'].split(' -')[0].split(' Direct')[0]
@@ -913,10 +919,10 @@ with tab_portfolio:
                     'Category': cat,
                     'Current Robustness': fund['robustnessScore'],
                     'Current Avg Return %': fund['avgReturn'],
-                    'Action': f"Keep (Rank #{fund_rank})" if fund_rank and fund_rank <= 3 else "Consider Swap",
-                    'Recommended Fund': top['schemeName'].split(' -')[0].split(' Direct')[0] if top and (not fund_rank or fund_rank > 3) else '—',
-                    'Recommended Robustness': top['robustnessScore'] if top and (not fund_rank or fund_rank > 3) else '—',
-                    'Recommended Avg Return %': top['avgReturn'] if top and (not fund_rank or fund_rank > 3) else '—',
+                    'Action': ("Keep" if (fund_rank and fund_rank <= 3) or (top and top['robustnessScore'] <= fund['robustnessScore']) else "Consider Swap"),
+                    'Recommended Fund': top['schemeName'].split(' -')[0].split(' Direct')[0] if top and top['robustnessScore'] > fund['robustnessScore'] else '—',
+                    'Recommended Robustness': top['robustnessScore'] if top and top['robustnessScore'] > fund['robustnessScore'] else '—',
+                    'Recommended Avg Return %': top['avgReturn'] if top and top['robustnessScore'] > fund['robustnessScore'] else '—',
                 })
             rec_df = pd.DataFrame(rec_rows)
             st.download_button(
