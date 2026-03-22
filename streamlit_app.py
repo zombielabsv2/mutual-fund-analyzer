@@ -8,6 +8,9 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
+import pdfplumber
+import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 
@@ -287,11 +290,198 @@ def analyze_portfolio_fund(scheme_code):
         return None
 
 
+# --- File Extraction & Fund Matching ---
+
+def extract_holdings_from_pdf(pdf_file):
+    """Extract mutual fund holdings from a PDF statement (Groww, Kuvera, MFCentral, etc.)."""
+    holdings = []
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for table in tables:
+                if not table or len(table) < 2:
+                    continue
+                # Find header row with "Scheme" or "Fund Name"
+                header_idx = None
+                for i, row in enumerate(table):
+                    row_text = ' '.join(str(cell or '').lower() for cell in row)
+                    if ('scheme' in row_text and 'name' in row_text) or ('fund' in row_text and 'amc' in row_text):
+                        header_idx = i
+                        break
+                if header_idx is None:
+                    continue
+
+                header = table[header_idx]
+                header_lower = [str(h or '').lower().strip() for h in header]
+
+                def find_col(*keywords):
+                    for idx, h in enumerate(header_lower):
+                        if all(k in h for k in keywords):
+                            return idx
+                    return None
+
+                name_col = find_col('scheme') or find_col('fund') or 0
+                cat_col = find_col('category')
+                subcat_col = find_col('sub')
+                invested_col = find_col('invested')
+                current_col = find_col('current')
+
+                for row in table[header_idx + 1:]:
+                    if not row or len(row) <= name_col or not row[name_col]:
+                        continue
+                    name = str(row[name_col]).strip()
+                    if not name or 'scheme' in name.lower():
+                        continue
+
+                    holding = {'name': name}
+                    if cat_col is not None and len(row) > cat_col and row[cat_col]:
+                        holding['category'] = str(row[cat_col]).strip()
+                    if subcat_col is not None and len(row) > subcat_col and row[subcat_col]:
+                        holding['subcategory'] = str(row[subcat_col]).strip()
+                    if invested_col is not None and len(row) > invested_col and row[invested_col]:
+                        try:
+                            holding['invested'] = float(str(row[invested_col]).replace(',', '').strip())
+                        except (ValueError, TypeError):
+                            pass
+                    if current_col is not None and len(row) > current_col and row[current_col]:
+                        try:
+                            holding['current'] = float(str(row[current_col]).replace(',', '').strip())
+                        except (ValueError, TypeError):
+                            pass
+                    holdings.append(holding)
+    return holdings
+
+
+def extract_holdings(uploaded_file):
+    """Extract holdings from PDF, CSV, or Excel file."""
+    file_type = uploaded_file.name.lower().split('.')[-1]
+
+    if file_type == 'pdf':
+        return extract_holdings_from_pdf(uploaded_file)
+
+    # CSV or Excel
+    if file_type == 'csv':
+        df = pd.read_csv(uploaded_file)
+    elif file_type in ('xlsx', 'xls'):
+        df = pd.read_excel(uploaded_file)
+    else:
+        return []
+
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    name_col = next((c for c in df.columns if 'scheme' in c or 'fund' in c), df.columns[0])
+    cat_col = next((c for c in df.columns if c == 'category'), None)
+    subcat_col = next((c for c in df.columns if 'sub' in c and 'cat' in c), None)
+    invested_col = next((c for c in df.columns if 'invested' in c), None)
+    current_col = next((c for c in df.columns if 'current' in c), None)
+
+    holdings = []
+    for _, row in df.iterrows():
+        name = str(row[name_col]).strip()
+        if not name or name == 'nan':
+            continue
+        holding = {'name': name}
+        if cat_col and pd.notna(row.get(cat_col)):
+            holding['category'] = str(row[cat_col]).strip()
+        if subcat_col and pd.notna(row.get(subcat_col)):
+            holding['subcategory'] = str(row[subcat_col]).strip()
+        if invested_col and pd.notna(row.get(invested_col)):
+            try:
+                holding['invested'] = float(str(row[invested_col]).replace(',', ''))
+            except (ValueError, TypeError):
+                pass
+        if current_col and pd.notna(row.get(current_col)):
+            try:
+                holding['current'] = float(str(row[current_col]).replace(',', ''))
+            except (ValueError, TypeError):
+                pass
+        holdings.append(holding)
+    return holdings
+
+
+def consolidate_holdings(holdings):
+    """Merge duplicate fund holdings (same fund, different folios)."""
+    consolidated = {}
+    for h in holdings:
+        key = ' '.join(h['name'].lower().split())
+        if key in consolidated:
+            c = consolidated[key]
+            if h.get('invested'):
+                c['invested'] = (c.get('invested') or 0) + h.get('invested', 0)
+            if h.get('current'):
+                c['current'] = (c.get('current') or 0) + h.get('current', 0)
+        else:
+            consolidated[key] = h.copy()
+    return list(consolidated.values())
+
+
+@st.cache_data(ttl=3600)
+def get_all_schemes():
+    """Fetch all mutual fund schemes from mfapi.in."""
+    try:
+        response = requests.get(MFAPI_BASE_URL, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return []
+
+
+def match_fund_to_scheme(fund_name, all_schemes):
+    """Find the best matching Direct Growth scheme for a portfolio fund name."""
+    query = fund_name.lower().strip()
+
+    # Extract key words (3+ chars, skip filler)
+    filler = {'fund', 'plan', 'option', 'growth', 'direct', 'the', 'of', 'and', 'scheme'}
+    words = [w for w in query.replace('-', ' ').replace('(', ' ').replace(')', ' ').split() if len(w) >= 3]
+    key_words = [w for w in words if w not in filler]
+    if not key_words:
+        key_words = words[:3]
+
+    # Pre-filter: must be Direct, not IDCW/dividend, and share at least 2 key words
+    candidates = []
+    for scheme in all_schemes:
+        name = scheme.get('schemeName', '').lower()
+        if 'direct' not in name:
+            continue
+        if 'idcw' in name or 'dividend' in name or 'bonus' in name:
+            continue
+        match_count = sum(1 for w in key_words if w in name)
+        if match_count >= min(2, len(key_words)):
+            candidates.append(scheme)
+
+    # Relax to 1 key word if no candidates
+    if not candidates:
+        for scheme in all_schemes:
+            name = scheme.get('schemeName', '').lower()
+            if 'direct' not in name:
+                continue
+            if any(w in name for w in key_words):
+                candidates.append(scheme)
+
+    if not candidates:
+        return None, 0
+
+    # Score with SequenceMatcher
+    best_match = None
+    best_score = 0
+    for scheme in candidates:
+        name = scheme.get('schemeName', '').lower()
+        score = SequenceMatcher(None, query, name).ratio()
+        if 'growth' in name and 'growth' in query:
+            score += 0.05
+        if score > best_score:
+            best_score = score
+            best_match = scheme
+
+    return (best_match, round(best_score * 100)) if best_score >= 0.35 else (None, 0)
+
+
 # --- Session State ---
 if 'selected_funds' not in st.session_state:
     st.session_state.selected_funds = []
 if 'portfolio_funds' not in st.session_state:
     st.session_state.portfolio_funds = []
+if 'portfolio_unmatched' not in st.session_state:
+    st.session_state.portfolio_unmatched = []
 
 
 # --- Header ---
@@ -497,90 +687,70 @@ with tab_rankings:
 # ===================== PORTFOLIO REVIEW TAB =====================
 with tab_portfolio:
     st.subheader("Portfolio Review & Swap Recommendations")
-    st.caption("Upload your current mutual fund holdings. We'll compare each fund against the top-ranked alternative in its SEBI category and recommend swaps with full rationale.")
+    st.caption("Upload your mutual fund statement (PDF, CSV, or Excel) from Groww, Kuvera, MFCentral, or any broker. We'll auto-identify your funds and recommend more robust alternatives in each category.")
 
-    # --- Input Section ---
-    input_method = st.radio("How would you like to add your portfolio?", ["Upload CSV", "Search & Add"], horizontal=True)
+    uploaded = st.file_uploader(
+        "Upload your holdings statement",
+        type=["pdf", "csv", "xlsx", "xls"],
+        help="Supported: PDF/CSV/Excel from Groww, Kuvera, MFCentral, CAMS, Karvy, or any broker.",
+    )
 
-    if input_method == "Upload CSV":
-        st.markdown("**CSV format:** One fund per row. First column = Scheme Code, second column (optional) = Investment Amount in ₹.")
-        sample_csv = "Scheme Code,Investment Amount\n122639,100000\n118989,50000\n119773,75000"
-        st.download_button("📥 Download Sample CSV", sample_csv, "sample_portfolio.csv", "text/csv")
+    if uploaded and not st.session_state.portfolio_funds:
+        # Extract holdings from file
+        with st.spinner("Extracting holdings from your statement..."):
+            raw_holdings = extract_holdings(uploaded)
 
-        uploaded = st.file_uploader("Upload your portfolio CSV", type=["csv"])
-        if uploaded:
-            try:
-                df_upload = pd.read_csv(uploaded)
-                df_upload.columns = [c.strip().lower().replace(' ', '_') for c in df_upload.columns]
-                # Find scheme code column
-                code_col = None
-                for col in df_upload.columns:
-                    if 'code' in col or 'scheme' in col:
-                        code_col = col
-                        break
-                if not code_col:
-                    code_col = df_upload.columns[0]
-                # Find amount column
-                amt_col = None
-                for col in df_upload.columns:
-                    if 'amount' in col or 'value' in col or 'invest' in col:
-                        amt_col = col
-                        break
-                codes = df_upload[code_col].astype(str).tolist()
-                amounts = df_upload[amt_col].tolist() if amt_col else [None] * len(codes)
+        if not raw_holdings:
+            st.error("Could not extract holdings from this file. Please make sure it contains a table with fund names.")
+        else:
+            holdings = consolidate_holdings(raw_holdings)
+            st.success(f"Found **{len(raw_holdings)} entries** → **{len(holdings)} unique funds** after consolidating duplicate folios.")
 
-                st.markdown(f"Found **{len(codes)} funds** in CSV.")
-                if st.button("🔍 Analyze Portfolio", type="primary"):
-                    st.session_state.portfolio_funds = []
-                    progress = st.progress(0, text="Analyzing your portfolio...")
-                    for i, (code, amt) in enumerate(zip(codes, amounts)):
-                        data = analyze_portfolio_fund(code.strip())
+            if st.button("🔍 Analyze Portfolio & Get Recommendations", type="primary"):
+                all_schemes = get_all_schemes()
+                portfolio_results = []
+                unmatched_funds = []
+                progress = st.progress(0, text="Matching and analyzing your funds...")
+
+                for i, h in enumerate(holdings):
+                    scheme, confidence = match_fund_to_scheme(h['name'], all_schemes)
+                    if scheme:
+                        code = str(scheme['schemeCode'])
+                        data = analyze_portfolio_fund(code)
                         if data:
-                            data['amount'] = amt
-                            st.session_state.portfolio_funds.append(data)
-                        progress.progress((i + 1) / len(codes), text=f"Analyzing fund {i + 1}/{len(codes)}...")
-                    progress.empty()
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Error reading CSV: {e}")
-    else:
-        query = st.text_input("Search fund to add", placeholder="e.g. HDFC Mid Cap, Parag Parikh, 122639...", key="portfolio_search")
-        if query and len(query) >= 2:
-            results = search_funds_api(query)
-            if results:
-                fund_options = {r['schemeName']: r for r in results}
-                selected = st.selectbox("Select fund:", list(fund_options.keys()), key="portfolio_select")
-                col_amt, col_btn = st.columns([3, 1])
-                with col_amt:
-                    amount = st.number_input("Investment amount (₹, optional)", min_value=0, value=0, key="portfolio_amt")
-                with col_btn:
-                    st.write("")
-                    if st.button("➕ Add", type="primary"):
-                        fund = fund_options[selected]
-                        code = fund['schemeCode']
-                        if any(f['schemeCode'] == code for f in st.session_state.portfolio_funds):
-                            st.warning("Already in portfolio.")
+                            data['amount'] = h.get('invested')
+                            data['current'] = h.get('current')
+                            data['original_name'] = h['name']
+                            data['match_confidence'] = confidence
+                            data['original_category'] = h.get('category', '')
+                            data['original_subcategory'] = h.get('subcategory', '')
+                            portfolio_results.append(data)
                         else:
-                            with st.spinner("Analyzing fund..."):
-                                data = analyze_portfolio_fund(code)
-                            if data:
-                                data['amount'] = amount if amount > 0 else None
-                                st.session_state.portfolio_funds.append(data)
-                                st.rerun()
-                            else:
-                                st.error("Not enough historical data for 5-year rolling returns.")
-            elif query:
-                st.info("No funds found.")
+                            unmatched_funds.append(h['name'])
+                    else:
+                        unmatched_funds.append(h['name'])
+                    progress.progress((i + 1) / len(holdings), text=f"Analyzing fund {i + 1}/{len(holdings)}...")
+
+                progress.empty()
+                st.session_state.portfolio_funds = portfolio_results
+                st.session_state.portfolio_unmatched = unmatched_funds
+                st.rerun()
 
     # --- Portfolio Analysis & Recommendations ---
     if st.session_state.portfolio_funds:
-        st.divider()
         portfolio = st.session_state.portfolio_funds
 
         # Clear button
-        if st.button("🗑️ Clear Portfolio"):
+        if st.button("🗑️ Clear & Upload New Statement"):
             st.session_state.portfolio_funds = []
+            st.session_state.portfolio_unmatched = []
             st.rerun()
+
+        # Show unmatched funds
+        if st.session_state.portfolio_unmatched:
+            with st.expander(f"⚠️ {len(st.session_state.portfolio_unmatched)} funds could not be matched (insufficient history or not found)"):
+                for name in st.session_state.portfolio_unmatched:
+                    st.markdown(f"- {name}")
 
         # Portfolio summary table
         st.markdown("### Your Portfolio")
@@ -596,7 +766,11 @@ with tab_portfolio:
                 'Robustness': f['robustnessScore'],
             }
             if f.get('amount'):
-                row['Amount (₹)'] = f"{f['amount']:,.0f}"
+                row['Invested (₹)'] = f"{f['amount']:,.0f}"
+            if f.get('current'):
+                row['Current (₹)'] = f"{f['current']:,.0f}"
+            if f.get('match_confidence'):
+                row['Match %'] = f"{f['match_confidence']}%"
             port_rows.append(row)
         st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
 
@@ -751,8 +925,8 @@ with tab_portfolio:
                 f"portfolio_recommendations_{datetime.now().strftime('%Y%m%d')}.csv",
                 "text/csv",
             )
-    else:
-        st.info("Upload a CSV or search and add funds above to get personalized swap recommendations.")
+    elif not uploaded:
+        st.info("Upload your mutual fund statement (PDF from Groww/Kuvera, CSV, or Excel) to get personalized swap recommendations.")
 
 
 # ===================== METHODOLOGY TAB =====================
