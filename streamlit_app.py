@@ -914,6 +914,78 @@ with tab_portfolio:
             else:
                 st.warning("Your portfolio has **significant room for optimization**. The recommended swaps could meaningfully improve your risk-adjusted returns.")
 
+        # --- Missing Category Opportunities ---
+        # Find equity categories present in rankings but absent from portfolio
+        equity_categories = {"Large Cap", "Large & Mid Cap", "Mid Cap", "Small Cap",
+                             "Flexi Cap", "Multi Cap", "Value / Contra", "Focused",
+                             "ELSS", "Sectoral / Thematic", "Index Fund"}
+        portfolio_cats = set(f['category'] for f in portfolio)
+        missing_cats = sorted(equity_categories - portfolio_cats)
+
+        if missing_cats and rankings:
+            st.divider()
+            st.markdown("### Categories Missing From Your Portfolio")
+            st.caption("These equity categories have strong performers in our rankings but are not represented in your portfolio.")
+
+            # Compute portfolio average robustness (equity funds only)
+            equity_funds = [f for f in portfolio if f['category'] in equity_categories]
+            portfolio_avg_rob = (sum(f['robustnessScore'] for f in equity_funds) / len(equity_funds)) if equity_funds else 0
+            portfolio_avg_ret = (sum(f['avgReturn'] for f in equity_funds) / len(equity_funds)) if equity_funds else 0
+
+            opportunities = []
+            for cat in missing_cats:
+                cat_funds = rankings_by_cat.get(cat, [])
+                if not cat_funds:
+                    continue
+                top = cat_funds[0]
+                cat_avg_rob = sum(f['robustnessScore'] for f in cat_funds) / len(cat_funds)
+                cat_avg_ret = sum(f['avgReturn'] for f in cat_funds) / len(cat_funds)
+                opportunities.append({
+                    'category': cat,
+                    'top_fund': top,
+                    'cat_avg_rob': round(cat_avg_rob, 1),
+                    'cat_avg_ret': round(cat_avg_ret, 1),
+                    'num_funds': len(cat_funds),
+                    'beats_portfolio': cat_avg_rob > portfolio_avg_rob,
+                })
+
+            # Sort: categories that beat portfolio average first, then by avg robustness
+            opportunities.sort(key=lambda x: (not x['beats_portfolio'], -x['cat_avg_rob']))
+
+            for opp in opportunities:
+                top = opp['top_fund']
+                top_name = top['schemeName'].split(' -')[0].split(' Direct')[0]
+                cat = opp['category']
+
+                if opp['beats_portfolio'] and portfolio_avg_rob > 0:
+                    icon = "🟢"
+                    badge = f"Category avg robustness **{opp['cat_avg_rob']}** vs your portfolio avg **{round(portfolio_avg_rob, 1)}**"
+                else:
+                    icon = "🔵"
+                    badge = f"Category avg robustness: **{opp['cat_avg_rob']}**"
+
+                with st.expander(f"{icon} **{cat}** — Top pick: {top_name}"):
+                    st.markdown(badge)
+                    c1, c2, c3, c4, c5 = st.columns(5)
+                    c1.metric("Avg Return", f"{top['avgReturn']}%")
+                    c2.metric("Min Return", f"{top['minReturn']}%")
+                    c3.metric("Std Dev", f"{top['stdDev']}")
+                    c4.metric("Positive %", f"{top['positivePercentage']}%")
+                    c5.metric("Robustness", f"{top['robustnessScore']}")
+
+                    # Show top 3 in category
+                    if len(rankings_by_cat.get(cat, [])) > 1:
+                        st.markdown("**Top funds in this category:**")
+                        for i, f in enumerate(rankings_by_cat[cat][:3]):
+                            fname = f['schemeName'].split(' -')[0].split(' Direct')[0]
+                            st.markdown(f"{i+1}. **{fname}** — Avg: {f['avgReturn']}%, Robustness: {f['robustnessScore']}")
+
+                    if opp['beats_portfolio']:
+                        ret_uplift = round(opp['cat_avg_ret'] - portfolio_avg_ret, 1)
+                        st.markdown(f"**Why consider?** This category averages **{opp['cat_avg_ret']}% returns** "
+                                    f"({'**' + str(ret_uplift) + '%** higher' if ret_uplift > 0 else 'comparable'} "
+                                    f"to your portfolio's {round(portfolio_avg_ret, 1)}%) with a robustness score of {opp['cat_avg_rob']}.")
+
             # Download recommendations
             rec_rows = []
             for fund in portfolio:
