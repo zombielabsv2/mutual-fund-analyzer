@@ -914,6 +914,92 @@ with tab_portfolio:
             else:
                 st.warning("Your portfolio has **significant room for optimization**. The recommended swaps could meaningfully improve your risk-adjusted returns.")
 
+        # --- Consolidation Analysis ---
+        # Group portfolio funds by category and flag over-diversification
+        from collections import defaultdict
+        cat_holdings = defaultdict(list)
+        for fund in portfolio:
+            cat_holdings[fund['category']].append(fund)
+
+        # Find categories with 2+ funds
+        over_diversified = {cat: funds for cat, funds in cat_holdings.items() if len(funds) >= 2}
+
+        if over_diversified:
+            st.divider()
+            st.markdown("### Consolidation Opportunities")
+            st.caption("Categories where you hold multiple funds. Consolidating to the strongest 1–2 funds per category reduces overlap, simplifies tracking, and concentrates capital in the best performers.")
+
+            total_current = sum(len(funds) for funds in over_diversified.values())
+            total_after = 0
+            total_freed = 0
+
+            for cat in sorted(over_diversified.keys()):
+                funds = over_diversified[cat]
+                # Sort by robustness descending
+                funds_sorted = sorted(funds, key=lambda f: f['robustnessScore'], reverse=True)
+
+                # For the recommended "keep" list: also consider if a ranked fund is better than all held funds
+                cat_ranked = rankings_by_cat.get(cat, [])
+                best_ranked = cat_ranked[0] if cat_ranked else None
+
+                # Decide how many to keep: 1 for most categories, 2 if large allocation
+                keep_count = 1
+                keep = funds_sorted[:keep_count]
+                exit_funds = funds_sorted[keep_count:]
+
+                # If the #1 ranked fund in this category beats all held funds, suggest it as the consolidation target
+                upgrade_to = None
+                if best_ranked and best_ranked['robustnessScore'] > keep[0]['robustnessScore']:
+                    # Check if user already holds the ranked fund
+                    holds_best = any(f['schemeCode'] == best_ranked['schemeCode'] for f in funds)
+                    if not holds_best:
+                        upgrade_to = best_ranked
+
+                total_after += keep_count
+                freed_amount = sum(f.get('current') or f.get('amount') or 0 for f in exit_funds)
+                total_freed += freed_amount
+
+                keep_name = keep[0]['schemeName'].split(' -')[0].split(' Direct')[0]
+
+                with st.expander(f"**{cat}** — {len(funds)} funds → keep {keep_count}", expanded=len(funds) >= 3):
+                    # Show all held funds ranked
+                    st.markdown("**Your holdings in this category (ranked by robustness):**")
+                    for i, f in enumerate(funds_sorted):
+                        fname = f['schemeName'].split(' -')[0].split(' Direct')[0]
+                        amt_str = f" · ₹{f['current']:,.0f}" if f.get('current') else (f" · ₹{f['amount']:,.0f}" if f.get('amount') else "")
+                        if i < keep_count:
+                            st.markdown(f"✅ **{i+1}. {fname}** — Robustness: {f['robustnessScore']}, Avg: {f['avgReturn']}%{amt_str} → **Keep**")
+                        else:
+                            st.markdown(f"🔻 {i+1}. {fname} — Robustness: {f['robustnessScore']}, Avg: {f['avgReturn']}%{amt_str} → **Consider exiting**")
+
+                    if upgrade_to:
+                        up_name = upgrade_to['schemeName'].split(' -')[0].split(' Direct')[0]
+                        st.markdown(f"💡 **Even better:** Consolidate all into **{up_name}** (Robustness: {upgrade_to['robustnessScore']}, Avg: {upgrade_to['avgReturn']}%) — ranked #1 in {cat}.")
+
+                    # Rationale
+                    st.markdown("---")
+                    if len(funds) >= 3:
+                        st.markdown(f"**Why consolidate?** Holding **{len(funds)} funds in {cat}** creates significant portfolio overlap — "
+                                    f"these funds likely hold many of the same underlying stocks. "
+                                    f"Consolidating into the strongest performer simplifies your portfolio and concentrates capital where returns are best.")
+                    else:
+                        rob_diff = round(funds_sorted[0]['robustnessScore'] - funds_sorted[-1]['robustnessScore'], 1)
+                        st.markdown(f"**Why consolidate?** Your strongest {cat} fund has a robustness score of **{funds_sorted[0]['robustnessScore']}** "
+                                    f"vs **{funds_sorted[-1]['robustnessScore']}** for the weakest — a gap of {rob_diff}. "
+                                    f"Consolidating removes the drag of the weaker fund.")
+
+                    if freed_amount > 0:
+                        st.markdown(f"**Capital freed up:** ₹{freed_amount:,.0f} — can be redeployed into the keeper fund or a missing category.")
+
+            # Summary
+            total_can_exit = total_current - total_after
+            st.markdown(f"---")
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("Overlapping Funds", total_current)
+            col_b.metric("Can Be Consolidated", total_can_exit)
+            if total_freed > 0:
+                col_c.metric("Capital to Redeploy", f"₹{total_freed:,.0f}")
+
         # --- Missing Category Opportunities ---
         # Find equity categories present in rankings but absent from portfolio
         equity_categories = {"Large Cap", "Large & Mid Cap", "Mid Cap", "Small Cap",
