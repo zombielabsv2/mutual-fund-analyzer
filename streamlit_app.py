@@ -583,7 +583,7 @@ st.markdown(
 )
 
 # --- Tabs ---
-tab_analyzer, tab_rankings, tab_portfolio, tab_methodology = st.tabs(["🔍 Analyzer", "🏆 Fund Rankings", "📋 Portfolio Review", "📐 Methodology"])
+tab_analyzer, tab_rankings, tab_portfolio, tab_pms, tab_methodology = st.tabs(["🔍 Analyzer", "🏆 Fund Rankings", "📋 Portfolio Review", "💎 PMS & AIF", "📐 Methodology"])
 
 
 # ===================== ANALYZER TAB =====================
@@ -1209,6 +1209,214 @@ with tab_portfolio:
             )
     elif not uploaded:
         st.info("Upload your mutual fund statement (PDF from Groww/Kuvera, CSV, or Excel) to get personalized swap recommendations.")
+
+
+# ===================== PMS & AIF REFERENCE TAB =====================
+with tab_pms:
+    st.subheader("PMS & AIF Reference Guide — India")
+    st.caption("Portfolio Management Services (min ₹50L) and Alternative Investment Funds (min ₹1Cr). Data from public sources — verify with official factsheets before investing.")
+
+    pms_view = st.radio("View", ["PMS Strategies", "AIF Category III", "Fee Comparison", "PMS vs Mutual Funds"], horizontal=True)
+
+    if pms_view == "PMS Strategies":
+        # --- PMS Data ---
+        pms_data = [
+            {"Provider": "SageOne", "Strategy": "Small Cap Portfolio (SSP)", "Approach": "Small & Micro Cap", "Inception": 2017, "SI CAGR %": 40.2, "Fee Model": "13.75% profit share, no fixed fee", "AUM (₹ Cr)": 3261},
+            {"Provider": "Carnelian", "Strategy": "Shift Strategy", "Approach": "Mid & Small Cap", "Inception": 2020, "SI CAGR %": 37.6, "Fee Model": "2.5% + 15-20% > 8% hurdle", "AUM (₹ Cr)": 9667},
+            {"Provider": "SageOne", "Strategy": "Core Portfolio (SCP)", "Approach": "Mid & Small Cap", "Inception": 2012, "SI CAGR %": 29.0, "Fee Model": "13.75% profit share", "AUM (₹ Cr)": 3261},
+            {"Provider": "White Oak", "Strategy": "India Pioneers Equity", "Approach": "Multicap", "Inception": 2018, "SI CAGR %": 25.7, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 5457},
+            {"Provider": "Unifi", "Strategy": "Blended Rangoli", "Approach": "Multi-Strategy", "Inception": 2017, "SI CAGR %": 23.5, "Fee Model": "2% + 1.5% variable", "AUM (₹ Cr)": 20934},
+            {"Provider": "Unifi", "Strategy": "BCAD", "Approach": "Multi-Strategy", "Inception": 2018, "SI CAGR %": 23.4, "Fee Model": "2% + 1.5% variable", "AUM (₹ Cr)": 20934},
+            {"Provider": "Unifi", "Strategy": "HoldCo", "Approach": "Holding Co Discount", "Inception": 2014, "SI CAGR %": 20.5, "Fee Model": "2% + 1.5% variable", "AUM (₹ Cr)": 20934},
+            {"Provider": "Alchemy", "Strategy": "High Growth", "Approach": "Flexicap", "Inception": 2002, "SI CAGR %": 19.9, "Fee Model": "2.5% + 15-20% > 8-10% hurdle", "AUM (₹ Cr)": 957},
+            {"Provider": "Marcellus", "Strategy": "Consistent Compounders", "Approach": "Large Cap Quality", "Inception": 2018, "SI CAGR %": 18.6, "Fee Model": "0% + 20% > 8% hurdle (or 1% + 15%)", "AUM (₹ Cr)": 2476},
+            {"Provider": "ASK", "Strategy": "Growth Portfolio", "Approach": "Multicap", "Inception": 2001, "SI CAGR %": 17.4, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 26869},
+            {"Provider": "Ambit", "Strategy": "Coffee Can Portfolio", "Approach": "Large Cap Quality", "Inception": 2017, "SI CAGR %": 16.5, "Fee Model": "2.5% + 15% profit share", "AUM (₹ Cr)": 1700},
+            {"Provider": "ASK", "Strategy": "Indian Entrepreneur (IEP)", "Approach": "Multicap", "Inception": 2010, "SI CAGR %": 15.8, "Fee Model": "2.5% fixed or 1.5% + 20% > 10%", "AUM (₹ Cr)": 26869},
+            {"Provider": "Motilal Oswal", "Strategy": "NTDOP", "Approach": "Multicap", "Inception": 2003, "SI CAGR %": 15.4, "Fee Model": "2.5% + 20% > 8% hurdle", "AUM (₹ Cr)": 14483},
+            {"Provider": "Marcellus", "Strategy": "Kings of Capital", "Approach": "Financial Sector", "Inception": 2020, "SI CAGR %": 10.5, "Fee Model": "2.5% fixed, 10% hurdle", "AUM (₹ Cr)": 205},
+            {"Provider": "Motilal Oswal", "Strategy": "IOP", "Approach": "Small & Mid Cap", "Inception": 2010, "SI CAGR %": 9.1, "Fee Model": "2.5% + 20% > 8% hurdle", "AUM (₹ Cr)": 14483},
+            {"Provider": "360 ONE", "Strategy": "Multicap PMS", "Approach": "Multicap + Hedging", "Inception": 2013, "SI CAGR %": 20.0, "Fee Model": "2.5% fixed (tiered by AUM)", "AUM (₹ Cr)": 3085},
+            {"Provider": "Invesco", "Strategy": "DAWN / RISE", "Approach": "Multi-Strategy", "Inception": 2016, "SI CAGR %": None, "Fee Model": "Flat 10% profit share (lowest in industry)", "AUM (₹ Cr)": 20178},
+            {"Provider": "Valentis", "Strategy": "Rising Star Opportunity", "Approach": "Small Cap", "Inception": 2016, "SI CAGR %": None, "Fee Model": "2.5% + 15% > 10% hurdle", "AUM (₹ Cr)": 1685},
+            {"Provider": "Kotak", "Strategy": "Special Situations Value", "Approach": "Special Situations", "Inception": None, "SI CAGR %": None, "Fee Model": "2.5% or 1.5% + 15% > 10%", "AUM (₹ Cr)": 1767},
+            {"Provider": "Nippon India", "Strategy": "Emerging India", "Approach": "Mid Cap", "Inception": 2017, "SI CAGR %": None, "Fee Model": "2.5% fixed, no performance fee", "AUM (₹ Cr)": None},
+        ]
+
+        df_pms = pd.DataFrame(pms_data)
+        df_pms = df_pms.sort_values('SI CAGR %', ascending=False, na_position='last').reset_index(drop=True)
+        df_pms.index = df_pms.index + 1
+        df_pms.index.name = '#'
+
+        # Filters
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            approach_filter = st.multiselect("Filter by approach", sorted(df_pms['Approach'].unique()), default=[], placeholder="All approaches")
+        with col_f2:
+            provider_filter = st.multiselect("Filter by provider", sorted(df_pms['Provider'].unique()), default=[], placeholder="All providers")
+
+        filtered = df_pms.copy()
+        if approach_filter:
+            filtered = filtered[filtered['Approach'].isin(approach_filter)]
+        if provider_filter:
+            filtered = filtered[filtered['Provider'].isin(provider_filter)]
+
+        st.dataframe(filtered, use_container_width=True, column_config={
+            'SI CAGR %': st.column_config.NumberColumn(format="%.1f"),
+            'AUM (₹ Cr)': st.column_config.NumberColumn(format="%,.0f"),
+        })
+
+        # Insights
+        has_cagr = df_pms.dropna(subset=['SI CAGR %'])
+        if len(has_cagr) > 0:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Strategies", len(df_pms))
+            c2.metric("Avg SI CAGR", f"{has_cagr['SI CAGR %'].mean():.1f}%")
+            c3.metric("Top Performer", f"{has_cagr.iloc[0]['Provider']} {has_cagr.iloc[0]['Strategy']}"[:30])
+            c4.metric("Min Investment", "₹50 Lakh")
+
+        st.info("**Note:** Since Inception (SI) CAGR varies by measurement date. Longer track records (Alchemy 2002, ASK 2001, Motilal 2003) are more meaningful than newer strategies. Returns are pre-tax and gross of exit loads.")
+
+    elif pms_view == "AIF Category III":
+        aif_data = [
+            {"Provider": "A9 Finsight", "Fund": "Finavenue Growth Fund", "Type": "Long-Only", "FY25 Return %": 46.66, "Min Invest": "₹1 Cr", "AUM (₹ Cr)": None},
+            {"Provider": "Negen Capital", "Fund": "Undiscovered Value Fund", "Type": "Long-Only", "FY25 Return %": 33.61, "Min Invest": "₹1 Cr", "AUM (₹ Cr)": None},
+            {"Provider": "Swyom Advisors", "Fund": "India Alpha Fund", "Type": "Long-Short", "FY25 Return %": 31.79, "Min Invest": "₹1 Cr", "AUM (₹ Cr)": None},
+            {"Provider": "Helios Capital", "Fund": "India Long/Short", "Type": "Long-Short", "FY25 Return %": None, "Min Invest": "₹1 Cr", "AUM (₹ Cr)": 1347},
+            {"Provider": "Avendus", "Fund": "Enhanced Return Fund II", "Type": "70% Long + 30% L/S", "FY25 Return %": None, "Min Invest": "₹1 Cr", "AUM (₹ Cr)": None},
+            {"Provider": "Nuvama", "Fund": "MARS (Multi-Asset Return)", "Type": "Market Neutral", "FY25 Return %": 13.0, "Min Invest": "₹1 Cr", "AUM (₹ Cr)": 11307},
+            {"Provider": "WhiteSpace Alpha", "Fund": "Equity Plus Fund 1", "Type": "Market Neutral / Quant", "FY25 Return %": 14.5, "Min Invest": "₹1 Cr", "AUM (₹ Cr)": None},
+        ]
+
+        df_aif = pd.DataFrame(aif_data)
+        df_aif = df_aif.sort_values('FY25 Return %', ascending=False, na_position='last').reset_index(drop=True)
+        df_aif.index = df_aif.index + 1
+        df_aif.index.name = '#'
+
+        st.dataframe(df_aif, use_container_width=True, column_config={
+            'FY25 Return %': st.column_config.NumberColumn(format="%.1f"),
+            'AUM (₹ Cr)': st.column_config.NumberColumn(format="%,.0f"),
+        })
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Min Investment", "₹1 Crore")
+        c2.metric("Typical Fees", "2% + 20% above hurdle")
+        c3.metric("Top FY25 Return", f"{aif_data[0]['FY25 Return %']}%")
+
+        st.markdown("""
+**Key differences from Mutual Funds:**
+- **Higher minimum** — ₹1 Cr vs no minimum for MFs
+- **Less liquidity** — lock-in periods common (1-3 years)
+- **Can go short** — Long-Short and Market Neutral strategies can profit in falling markets
+- **Less regulated disclosure** — no daily NAV requirement like mutual funds
+- **Tax** — Category III AIFs are taxed at fund level (not pass-through), resulting in higher effective tax
+""")
+
+        st.warning("**Avendus Absolute Return Fund** — one of India's most popular AIFs — was wound down in January 2025 due to SEBI regulatory changes on derivative usage.")
+
+    elif pms_view == "Fee Comparison":
+        st.markdown("### Fee Structure Comparison")
+        st.caption("How different PMS providers charge — and how it impacts your net returns")
+
+        fee_data = [
+            {"Provider": "Invesco", "Fixed Fee": "0%", "Performance Fee": "10% on all profits", "Hurdle": "None", "Model": "Pure profit share"},
+            {"Provider": "SageOne", "Fixed Fee": "0%", "Performance Fee": "13.75% on all profits", "Hurdle": "None", "Model": "Pure profit share"},
+            {"Provider": "Marcellus CCP", "Fixed Fee": "0%", "Performance Fee": "20%", "Hurdle": "8%", "Model": "Performance only"},
+            {"Provider": "Marcellus CCP Alt", "Fixed Fee": "1.0%", "Performance Fee": "15%", "Hurdle": "12%", "Model": "Hybrid"},
+            {"Provider": "Marcellus LCP", "Fixed Fee": "1.5%", "Performance Fee": "20%", "Hurdle": "10%", "Model": "Hybrid + exit load"},
+            {"Provider": "ASK / Kotak", "Fixed Fee": "1.5%", "Performance Fee": "20%", "Hurdle": "10%", "Model": "Hybrid"},
+            {"Provider": "ASK / Motilal", "Fixed Fee": "2.5%", "Performance Fee": "None", "Hurdle": "—", "Model": "Fixed only"},
+            {"Provider": "Alchemy", "Fixed Fee": "2.5%", "Performance Fee": "15-20%", "Hurdle": "8-10%", "Model": "Hybrid (expensive)"},
+            {"Provider": "Motilal / Carnelian", "Fixed Fee": "2.5%", "Performance Fee": "20%", "Hurdle": "8%", "Model": "Hybrid (expensive)"},
+            {"Provider": "Nippon India", "Fixed Fee": "2.5%", "Performance Fee": "None", "Hurdle": "—", "Model": "Fixed only"},
+        ]
+
+        st.dataframe(pd.DataFrame(fee_data), use_container_width=True, hide_index=True)
+
+        # Fee impact illustration
+        st.markdown("### Fee Impact on ₹50 Lakh Over 5 Years")
+        st.caption("Assuming 20% gross return — how different fee structures eat into your wealth")
+
+        gross = 50_00_000
+        scenarios = [
+            ("Direct MF (0.5% TER)", 0.005, 0, 0),
+            ("Invesco PMS (0% + 10%)", 0, 0.10, 0),
+            ("SageOne (0% + 13.75%)", 0, 0.1375, 0),
+            ("Marcellus CCP (0% + 20% > 8%)", 0, 0.20, 0.08),
+            ("Hybrid (1.5% + 20% > 10%)", 0.015, 0.20, 0.10),
+            ("Expensive (2.5% + 20% > 8%)", 0.025, 0.20, 0.08),
+            ("Fixed Only (2.5%)", 0.025, 0, 0),
+        ]
+
+        impact_rows = []
+        for label, fixed, perf, hurdle in scenarios:
+            gross_rate = 0.20
+            net_rate = gross_rate - fixed
+            perf_drag = max(0, net_rate - hurdle) * perf
+            final_rate = net_rate - perf_drag
+            final_val = gross * ((1 + final_rate) ** 5)
+            fees_paid = gross * ((1 + gross_rate) ** 5) - final_val
+            impact_rows.append({
+                "Fee Model": label,
+                "Net CAGR %": round(final_rate * 100, 1),
+                "Final Value (₹)": f"₹{final_val:,.0f}",
+                "Fees Paid (₹)": f"₹{fees_paid:,.0f}",
+            })
+
+        st.dataframe(pd.DataFrame(impact_rows), use_container_width=True, hide_index=True)
+        st.info("This is a simplified illustration. Actual fees depend on high-water marks, crystallization periods, and market conditions.")
+
+    else:  # PMS vs Mutual Funds
+        st.markdown("### When Does PMS Make Sense Over Mutual Funds?")
+
+        comparison = [
+            {"Feature": "Minimum Investment", "Mutual Fund": "₹100 (SIP)", "PMS": "₹50 Lakh", "AIF Cat III": "₹1 Crore"},
+            {"Feature": "Regulation", "Mutual Fund": "SEBI (strict, daily NAV)", "PMS": "SEBI (moderate)", "AIF Cat III": "SEBI (flexible)"},
+            {"Feature": "Transparency", "Mutual Fund": "Daily NAV, monthly portfolio", "PMS": "Demat holdings visible", "AIF Cat III": "Periodic reporting"},
+            {"Feature": "Customization", "Mutual Fund": "None (pooled)", "PMS": "Some (separate account)", "AIF Cat III": "Strategy-level"},
+            {"Feature": "Liquidity", "Mutual Fund": "T+1 to T+3 redemption", "PMS": "T+3, possible exit load", "AIF Cat III": "Lock-in (1-3 years)"},
+            {"Feature": "Taxation", "Mutual Fund": "LTCG 12.5% > ₹1.25L", "PMS": "Same as direct equity", "AIF Cat III": "Taxed at fund level (MMR)"},
+            {"Feature": "Typical Fees", "Mutual Fund": "0.3-1.5% TER", "PMS": "1.5-2.5% + 15-20% perf", "AIF Cat III": "2% + 20% perf"},
+            {"Feature": "Can Short Sell", "Mutual Fund": "No", "PMS": "No", "AIF Cat III": "Yes"},
+            {"Feature": "Track Record Data", "Mutual Fund": "Public (mfapi.in)", "PMS": "Limited (SEBI monthly)", "AIF Cat III": "Very limited"},
+            {"Feature": "Best For", "Mutual Fund": "Everyone", "PMS": "HNIs wanting quality + control", "AIF Cat III": "Sophisticated investors"},
+        ]
+
+        st.dataframe(pd.DataFrame(comparison), use_container_width=True, hide_index=True)
+
+        st.markdown("""
+### Key Takeaways
+
+**PMS is worth considering when:**
+- You have ₹50L+ to allocate to equities
+- You want a specific investment philosophy (e.g., Marcellus quality, SageOne deep value)
+- You value seeing individual stock holdings in your demat
+- The PMS has a **5+ year track record** beating comparable MF categories after fees
+
+**Stick with Direct Mutual Funds when:**
+- Investment amount is below ₹50L
+- You want daily liquidity and simple taxation
+- A comparable MF category delivers similar returns at 0.3-1% TER vs 2.5%+ PMS fees
+- The PMS track record is less than 3 years
+
+**Consider AIF Cat III when:**
+- You have ₹1Cr+ and want absolute return / market-neutral strategies
+- You want exposure to long-short or derivatives-based strategies unavailable in MFs
+- You can accept 1-3 year lock-in periods
+""")
+
+        # Quick comparison: Top PMS vs Top MF
+        st.markdown("### Head-to-Head: Top PMS vs Top Mutual Funds")
+        st.caption("Do PMS strategies justify their higher fees?")
+
+        h2h = [
+            {"Category": "Multicap", "Top PMS": "White Oak Pioneers (25.7%)", "Top MF (5Y Rolling Avg)": "Check Rankings tab", "Fee Gap": "~2% fixed + 20% perf vs 0.5% TER"},
+            {"Category": "Small Cap", "Top PMS": "SageOne SSP (40.2%)", "Top MF (5Y Rolling Avg)": "Check Rankings tab", "Fee Gap": "13.75% profit share vs 0.5% TER"},
+            {"Category": "Large Cap Quality", "Top PMS": "Marcellus CCP (18.6%)", "Top MF (5Y Rolling Avg)": "Check Rankings tab", "Fee Gap": "0% + 20% > 8% vs 0.5% TER"},
+            {"Category": "Flexicap", "Top PMS": "Alchemy High Growth (19.9%)", "Top MF (5Y Rolling Avg)": "Check Rankings tab", "Fee Gap": "2.5% + 15% > 10% vs 0.5% TER"},
+        ]
+        st.dataframe(pd.DataFrame(h2h), use_container_width=True, hide_index=True)
+        st.info("Use the **Fund Rankings** tab to see actual mutual fund rolling return data for direct comparison. PMS returns shown are since-inception CAGR (not rolling) and vary by measurement date.")
 
 
 # ===================== METHODOLOGY TAB =====================
