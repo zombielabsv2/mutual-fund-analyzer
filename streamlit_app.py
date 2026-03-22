@@ -1,0 +1,534 @@
+"""
+Mutual Fund 5-Year Rolling Returns Analyzer — Streamlit Edition
+Analyze, compare, and rank Indian mutual funds by rolling return robustness.
+"""
+
+import streamlit as st
+import requests
+import pandas as pd
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import math
+
+# --- Page Config ---
+st.set_page_config(
+    page_title="MF Rolling Returns Analyzer",
+    page_icon="📈",
+    layout="wide",
+)
+
+MFAPI_BASE_URL = "https://api.mfapi.in/mf"
+
+# --- Fund Universe (verified Direct Growth equity scheme codes) ---
+RANKING_FUND_CODES = [
+    # Large Cap
+    "118269", "118479", "118531", "118617", "118632",
+    "118825", "119018", "119160", "119250", "120465",
+    # Large & Mid Cap
+    "118278", "118510", "119202", "119218", "119436",
+    "120357", "120596", "120665", "120826", "130498",
+    # Mid Cap
+    "118533", "118668", "118989", "119178", "119581",
+    "119775", "120726", "120841", "125307", "140228",
+    # Small Cap
+    "118525", "118778", "119212", "119556", "119589",
+    "120069", "120164", "120828", "125354", "125497", "130503",
+    # Flexi Cap
+    "118424", "118535", "118955", "119076", "120564",
+    "120662", "120843", "122639", "129046", "133839",
+    # Multi Cap
+    "118650", "120823", "131164", "141226", "149303", "149368",
+    # Value / Contra
+    "103490", "118494", "118784", "118935", "119549",
+    "119659", "119769", "119835", "120323", "120348",
+    # Focused
+    "118564", "118692", "118950", "119096", "119564",
+    "119727", "120468", "120722", "120834", "122389",
+    # ELSS / Tax Saving
+    "118285", "118540", "118620", "118803", "119060",
+    "119242", "119544", "119723", "119773", "120503",
+    "120847", "135781",
+    # Sectoral / Thematic
+    "118267", "118537", "118589", "119028", "119597",
+    "120175", "120587", "120837",
+    # Index Funds
+    "118266", "118482", "118741", "119648", "119827",
+    "120716", "147622",
+]
+
+
+# --- Shared Calculation Logic ---
+
+def calculate_rolling_returns(nav_data, years=5):
+    """Calculate rolling returns from NAV data."""
+    if not nav_data:
+        return []
+    parsed_data = []
+    for item in nav_data:
+        try:
+            date = datetime.strptime(item['date'], '%d-%m-%Y')
+            nav = float(item['nav'])
+            if nav > 0:
+                parsed_data.append((date, nav))
+        except (ValueError, KeyError):
+            continue
+    parsed_data.sort(key=lambda x: x[0])
+    if len(parsed_data) < 2:
+        return []
+    nav_lookup = {d: n for d, n in parsed_data}
+    rolling_returns = []
+    target_days = years * 365
+    for current_date, current_nav in parsed_data:
+        target_date = current_date - timedelta(days=target_days)
+        past_nav = None
+        past_date = None
+        if target_date in nav_lookup:
+            past_nav = nav_lookup[target_date]
+            past_date = target_date
+        else:
+            for delta in range(0, 16):
+                check_date = target_date + timedelta(days=delta)
+                if check_date in nav_lookup:
+                    past_nav = nav_lookup[check_date]
+                    past_date = check_date
+                    break
+                check_date = target_date - timedelta(days=delta)
+                if check_date in nav_lookup:
+                    past_nav = nav_lookup[check_date]
+                    past_date = check_date
+                    break
+        if past_nav and past_nav > 0:
+            actual_years = (current_date - past_date).days / 365.25
+            if actual_years >= years - 0.1:
+                cagr = (pow(current_nav / past_nav, 1 / actual_years) - 1) * 100
+                rolling_returns.append({
+                    'date': current_date.strftime('%Y-%m-%d'),
+                    'return': round(cagr, 2)
+                })
+    return rolling_returns
+
+
+def normalize_category(scheme_category):
+    """Map API scheme_category to a clean display category."""
+    if not scheme_category:
+        return "Other"
+    cat = scheme_category.lower()
+    if "large cap" in cat and "mid" not in cat:
+        return "Large Cap"
+    if "large" in cat and "mid" in cat:
+        return "Large & Mid Cap"
+    if "mid cap" in cat or "mid-cap" in cat:
+        return "Mid Cap"
+    if "small cap" in cat or "small-cap" in cat:
+        return "Small Cap"
+    if "flexi" in cat:
+        return "Flexi Cap"
+    if "multi" in cat:
+        return "Multi Cap"
+    if "value" in cat or "contra" in cat:
+        return "Value / Contra"
+    if "focused" in cat or "concentrate" in cat:
+        return "Focused"
+    if "elss" in cat or "tax" in cat:
+        return "ELSS"
+    if "thematic" in cat or "sectoral" in cat or "sector" in cat:
+        return "Sectoral / Thematic"
+    if "index" in cat or "nifty" in cat or "sensex" in cat:
+        return "Index Fund"
+    if "hybrid" in cat:
+        return "Hybrid"
+    return "Other"
+
+
+# --- Cached API Functions ---
+
+@st.cache_data(ttl=3600)
+def search_funds_api(query):
+    """Search mutual funds by name or code."""
+    try:
+        response = requests.get(f"{MFAPI_BASE_URL}", timeout=30)
+        response.raise_for_status()
+        all_funds = response.json()
+        q = query.lower()
+        results = []
+        for fund in all_funds:
+            code = str(fund.get('schemeCode', ''))
+            name = fund.get('schemeName', '')
+            if q in name.lower() or q in code:
+                results.append({'schemeCode': code, 'schemeName': name})
+            if len(results) >= 20:
+                break
+        return results
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=3600)
+def get_fund_rolling_returns(scheme_code, years=5):
+    """Fetch NAV data and compute rolling returns for one fund."""
+    try:
+        response = requests.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        nav_data = data.get('data', [])
+        meta = data.get('meta', {})
+        rolling = calculate_rolling_returns(nav_data, years)
+        if not rolling:
+            return None
+        returns_values = [r['return'] for r in rolling]
+        avg = sum(returns_values) / len(returns_values)
+        std = math.sqrt(sum((x - avg) ** 2 for x in returns_values) / len(returns_values))
+        stats = {
+            'min': round(min(returns_values), 2),
+            'max': round(max(returns_values), 2),
+            'average': round(avg, 2),
+            'stdDev': round(std, 2),
+            'positivePercentage': round(
+                len([r for r in returns_values if r > 0]) / len(returns_values) * 100, 2
+            ),
+            'totalPeriods': len(returns_values),
+        }
+        return {
+            'meta': meta,
+            'rollingReturns': rolling,
+            'statistics': stats,
+        }
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner="Analyzing 104 funds across all SEBI categories... This takes about a minute on first load.")
+def load_all_rankings():
+    """Fetch and rank all funds in the universe."""
+    def process_fund(scheme_code):
+        try:
+            response = requests.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=20)
+            if response.status_code != 200:
+                return None
+            data = response.json()
+            nav_data = data.get('data', [])
+            meta = data.get('meta', {})
+            if not nav_data or not meta:
+                return None
+            rolling = calculate_rolling_returns(nav_data, years=5)
+            if not rolling or len(rolling) < 10:
+                return None
+            returns_values = [r['return'] for r in rolling]
+            avg = sum(returns_values) / len(returns_values)
+            std = math.sqrt(sum((x - avg) ** 2 for x in returns_values) / len(returns_values))
+            mn = min(returns_values)
+            mx = max(returns_values)
+            pos_pct = len([r for r in returns_values if r > 0]) / len(returns_values) * 100
+            robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+            return {
+                'schemeCode': scheme_code,
+                'schemeName': meta.get('scheme_name', 'Unknown'),
+                'category': normalize_category(meta.get('scheme_category', '')),
+                'fundHouse': meta.get('fund_house', 'Unknown'),
+                'avgReturn': round(avg, 2),
+                'minReturn': round(mn, 2),
+                'maxReturn': round(mx, 2),
+                'stdDev': round(std, 2),
+                'positivePercentage': round(pos_pct, 1),
+                'totalPeriods': len(returns_values),
+                'robustnessScore': round(robustness, 2),
+            }
+        except Exception:
+            return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(process_fund, code): code for code in RANKING_FUND_CODES}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                results.append(result)
+    results.sort(key=lambda x: x['robustnessScore'], reverse=True)
+    return results
+
+
+# --- Session State ---
+if 'selected_funds' not in st.session_state:
+    st.session_state.selected_funds = []
+
+
+# --- Header ---
+st.markdown(
+    "<h1 style='text-align:center;'>📈 Mutual Fund 5-Year Rolling Returns Analyzer</h1>"
+    "<p style='text-align:center;color:#666;'>Analyze and compare rolling returns of Indian mutual funds</p>",
+    unsafe_allow_html=True,
+)
+
+# --- Tabs ---
+tab_analyzer, tab_rankings, tab_methodology = st.tabs(["🔍 Analyzer", "🏆 Fund Rankings", "📐 Methodology"])
+
+
+# ===================== ANALYZER TAB =====================
+with tab_analyzer:
+    st.subheader("Search & Compare Funds")
+
+    query = st.text_input("Search by fund name or AMFI code", placeholder="e.g. Parag Parikh, HDFC Mid Cap, 122639...")
+
+    if query and len(query) >= 2:
+        results = search_funds_api(query)
+        if not results:
+            st.info("No funds found. Try a different search term.")
+        else:
+            fund_options = {r['schemeName']: r for r in results}
+            selected_name = st.selectbox("Select a fund to add:", list(fund_options.keys()))
+
+            if st.button("➕ Add to Comparison", type="primary"):
+                fund = fund_options[selected_name]
+                code, name = fund['schemeCode'], fund['schemeName']
+
+                if any(f['code'] == code for f in st.session_state.selected_funds):
+                    st.warning("This fund is already selected.")
+                elif len(st.session_state.selected_funds) >= 5:
+                    st.warning("Maximum 5 funds can be compared at once.")
+                else:
+                    with st.spinner(f"Loading rolling returns for {name[:40]}..."):
+                        data = get_fund_rolling_returns(code)
+                    if data and data.get('rollingReturns'):
+                        st.session_state.selected_funds.append({
+                            'code': code,
+                            'name': name,
+                            'data': data['rollingReturns'],
+                            'stats': data['statistics'],
+                        })
+                        st.rerun()
+                    else:
+                        st.error("Not enough historical data for 5-year rolling returns.")
+
+    # Show selected funds
+    if st.session_state.selected_funds:
+        st.markdown(f"**Selected Funds ({len(st.session_state.selected_funds)}/5)**")
+        cols = st.columns(len(st.session_state.selected_funds))
+        for i, fund in enumerate(st.session_state.selected_funds):
+            with cols[i]:
+                short_name = fund['name'].split(' -')[0].split(' Direct')[0][:25]
+                if st.button(f"✕ {short_name}", key=f"rm_{fund['code']}"):
+                    st.session_state.selected_funds.pop(i)
+                    st.rerun()
+
+        # --- Rolling Returns Chart ---
+        st.subheader("5-Year Rolling Returns Chart")
+        colors = ['#1a237e', '#c62828', '#2e7d32', '#f57c00', '#6a1b9a']
+        fig = go.Figure()
+        for i, fund in enumerate(st.session_state.selected_funds):
+            dates = [d['date'] for d in fund['data']]
+            returns = [d['return'] for d in fund['data']]
+            label = fund['name'].split(' -')[0].split(' Direct')[0][:30]
+            fig.add_trace(go.Scatter(
+                x=dates, y=returns, name=label,
+                mode='lines', line=dict(color=colors[i % len(colors)], width=2),
+                hovertemplate='%{x}<br>%{y:.2f}%<extra>' + label + '</extra>',
+            ))
+        fig.update_layout(
+            yaxis_title='CAGR (%)',
+            xaxis_title='Date',
+            hovermode='x unified',
+            legend=dict(orientation='h', y=-0.15),
+            margin=dict(t=20, b=80),
+            height=450,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # --- Statistics Table ---
+        st.subheader("Statistics Summary")
+        stats_rows = []
+        for fund in st.session_state.selected_funds:
+            s = fund['stats']
+            stats_rows.append({
+                'Fund Name': fund['name'].split(' -')[0].split(' Direct')[0],
+                'Min (%)': s['min'],
+                'Max (%)': s['max'],
+                'Average (%)': s['average'],
+                'Std Dev': s['stdDev'],
+                'Positive Periods (%)': s['positivePercentage'],
+                'Total Periods': s['totalPeriods'],
+            })
+        st.dataframe(pd.DataFrame(stats_rows), use_container_width=True, hide_index=True)
+
+        # --- CSV Export ---
+        all_dates = sorted(set(d['date'] for f in st.session_state.selected_funds for d in f['data']))
+        csv_rows = []
+        for date in all_dates:
+            row = {'Date': date}
+            for fund in st.session_state.selected_funds:
+                lookup = {d['date']: d['return'] for d in fund['data']}
+                short = fund['name'].split(' -')[0][:30]
+                row[short] = lookup.get(date, '')
+            csv_rows.append(row)
+        csv_df = pd.DataFrame(csv_rows)
+        st.download_button(
+            "📥 Export Rolling Returns CSV",
+            csv_df.to_csv(index=False),
+            f"rolling_returns_{datetime.now().strftime('%Y%m%d')}.csv",
+            "text/csv",
+        )
+    else:
+        st.info("Search and select funds above to analyze their 5-year rolling returns.")
+
+
+# ===================== RANKINGS TAB =====================
+with tab_rankings:
+    st.subheader("Top Funds by 5-Year Rolling Return Robustness")
+    st.caption("Funds ranked by a robustness score that rewards high average returns, consistency, and downside protection.")
+
+    col_top, col_spacer = st.columns([2, 8])
+    with col_top:
+        top_n = st.selectbox("Show", [10, 20, 30, 50, 100], index=0, key="top_n_select")
+
+    if st.button("🔄 Load / Refresh Rankings", type="primary"):
+        st.cache_data.clear()
+
+    rankings = load_all_rankings()
+
+    if rankings:
+        # Category filter
+        categories = sorted(set(f['category'] for f in rankings))
+        selected_cats = st.multiselect("Filter by category", categories, default=[], placeholder="All categories")
+
+        # Filter
+        filtered = rankings
+        if selected_cats:
+            filtered = [f for f in rankings if f['category'] in selected_cats]
+        filtered = filtered[:top_n]
+
+        # --- Insights ---
+        avg_ret = sum(f['avgReturn'] for f in rankings) / len(rankings)
+        best_cat, best_score = '', 0
+        cat_groups = {}
+        for f in rankings:
+            cat_groups.setdefault(f['category'], []).append(f['robustnessScore'])
+        for cat, scores in cat_groups.items():
+            cat_avg = sum(scores) / len(scores)
+            if cat_avg > best_score:
+                best_cat, best_score = cat, cat_avg
+        decent = [f for f in rankings if f['avgReturn'] >= avg_ret]
+        most_consistent = min(decent, key=lambda f: f['stdDev']) if decent else rankings[0]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Funds Analyzed", len(rankings))
+        c2.metric("Top Fund", rankings[0]['schemeName'].split(' -')[0].split(' Direct')[0][:22])
+        c3.metric("Strongest Category", best_cat)
+        c4.metric("Most Consistent", most_consistent['schemeName'].split(' -')[0].split(' Direct')[0][:22])
+
+        # --- Rankings Table ---
+        df = pd.DataFrame(filtered)
+        df.insert(0, 'Rank', range(1, len(df) + 1))
+        df['Fund Name'] = df['schemeName'].apply(lambda x: x.split(' -')[0].split(' Direct')[0])
+        df['Fund House'] = df['fundHouse'].apply(lambda x: x.split(' Mutual')[0])
+
+        display_df = df[['Rank', 'Fund Name', 'Fund House', 'category', 'avgReturn', 'minReturn',
+                         'maxReturn', 'stdDev', 'positivePercentage', 'robustnessScore']].copy()
+        display_df.columns = ['#', 'Fund Name', 'Fund House', 'Category', 'Avg Return %',
+                              'Min %', 'Max %', 'Std Dev', 'Positive %', 'Robustness']
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                '#': st.column_config.NumberColumn(width="small"),
+                'Avg Return %': st.column_config.NumberColumn(format="%.1f"),
+                'Min %': st.column_config.NumberColumn(format="%.1f"),
+                'Max %': st.column_config.NumberColumn(format="%.1f"),
+                'Std Dev': st.column_config.NumberColumn(format="%.1f"),
+                'Positive %': st.column_config.NumberColumn(format="%.0f"),
+                'Robustness': st.column_config.NumberColumn(format="%.1f"),
+            },
+        )
+
+        # --- Download ---
+        csv_data = display_df.to_csv(index=False)
+        st.download_button(
+            "📥 Download Rankings CSV",
+            csv_data,
+            f"fund_rankings_top{top_n}_{datetime.now().strftime('%Y%m%d')}.csv",
+            "text/csv",
+        )
+    else:
+        st.info("Click **Load / Refresh Rankings** to analyze funds.")
+
+
+# ===================== METHODOLOGY TAB =====================
+with tab_methodology:
+    st.markdown("""
+## How This Works
+
+This tool analyzes Indian equity mutual funds by computing their **5-year rolling returns** and ranking them by a **robustness score** that captures not just how high the returns are, but how consistent and reliable they have been over time.
+
+---
+
+### 1. Fund Universe
+
+We analyze **104 Direct Growth equity mutual funds** across 11 SEBI-defined categories:
+
+| Category Group | Categories | Count |
+|---|---|---|
+| **Market Cap Based** | Large Cap, Large & Mid Cap, Mid Cap, Small Cap | 41 funds |
+| **Diversified / Strategy** | Flexi Cap, Multi Cap, Value/Contra, Focused | 36 funds |
+| **Tax Saving & Others** | ELSS, Sectoral/Thematic, Index Funds | 27 funds |
+
+**Selection criteria:**
+- Only **Direct Growth** plans (no regular plans, no IDCW/dividend)
+- Funds from **25+ top AMCs** (SBI, HDFC, ICICI, Axis, Kotak, Mirae, Nippon, DSP, UTI, Canara Robeco, Franklin, Parag Parikh, Quant, Motilal Oswal, Tata, Aditya Birla, Edelweiss, Sundaram, PGIM, Bandhan, HSBC, Invesco, etc.)
+- Only funds with **sufficient NAV history** (≥ 5 years of data) are included in rankings
+
+---
+
+### 2. Rolling Returns Calculation
+
+For each fund, we compute the **5-year CAGR** at every available date:
+
+> **CAGR = (NAV_today / NAV_5_years_ago)^(1/5) − 1**
+
+This is computed for **every trading day** where a matching NAV exists ~5 years prior (within a 15-day window).
+
+> **Why rolling returns?** A single-point return ("this fund gave 18% over 5 years") depends entirely on entry and exit dates. Rolling returns show what the return would have been if you invested on *any* date and held for 5 years — revealing consistency, not just peak performance.
+
+---
+
+### 3. Statistical Metrics
+
+| Metric | What It Tells You |
+|---|---|
+| **Average Return** | Mean 5-year CAGR across all windows. Higher = better wealth creation. |
+| **Minimum Return** | Worst 5-year return ever. A positive min means the fund *never* lost money over any 5-year period. |
+| **Maximum Return** | Best 5-year return. Shows upside potential. |
+| **Standard Deviation** | How much returns vary. Lower = more predictable. |
+| **Positive Periods %** | % of all 5-year windows with positive returns. 100% = never negative over 5 years. |
+
+---
+
+### 4. Robustness Score
+
+> **Score = (Avg Return × Positive%) / (1 + StdDev / 10)**
+
+This rewards:
+- **High average returns** — wealth creation over time
+- **High positive period %** — rarely loses money over 5-year windows
+- **Low standard deviation** — consistent, not wildly swinging
+
+A fund with 15% avg but wild swings will score *lower* than a fund with 13% avg that is rock-solid consistent. The score captures **reliability of wealth creation**.
+
+---
+
+### 5. Data Source
+
+All NAV data from [mfapi.in](https://www.mfapi.in/) — historical NAV data for all AMFI-registered Indian mutual funds, updated daily.
+
+Fund categorization uses the **SEBI mutual fund categorization framework** (October 2017).
+
+---
+
+### 6. Limitations
+
+- **Survivorship bias** — Only active funds are analyzed. Merged/closed funds (likely poor performers) are excluded.
+- **Past performance** — Rolling returns are backward-looking. High robustness does not guarantee future returns.
+- **Fund manager changes** — Track record may reflect a previous manager's skill.
+- **AUM & liquidity** — Not accounted for; can impact future performance (especially small cap).
+- **Expense ratios** — NAV is net of expenses, so implicitly included. Direct plans have lower costs than Regular.
+""")

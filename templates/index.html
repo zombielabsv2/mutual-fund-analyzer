@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mutual Fund Rolling Returns Analyzer</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Mutual Fund 5-Year Rolling Returns Analyzer</h1>
+            <p class="subtitle">Analyze and compare rolling returns of Indian mutual funds</p>
+        </header>
+
+        <!-- Tab Navigation -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="analyzer">Analyzer</button>
+            <button class="tab-btn" data-tab="rankings">Fund Rankings</button>
+            <button class="tab-btn" data-tab="methodology">Methodology</button>
+        </nav>
+
+        <!-- ===== Analyzer Tab ===== -->
+        <div class="tab-panel active" id="analyzerPanel">
+            <section class="search-section">
+                <div class="search-container">
+                    <input
+                        type="text"
+                        id="searchInput"
+                        placeholder="Search by fund name or AMFI code..."
+                        autocomplete="off"
+                    >
+                    <div id="searchResults" class="search-results"></div>
+                </div>
+            </section>
+
+            <section class="selected-funds">
+                <h2>Selected Funds <span class="fund-count">(<span id="fundCount">0</span>/5)</span></h2>
+                <div id="selectedFundsList" class="funds-list"></div>
+                <p id="noFundsMessage" class="no-funds-message">Search and select funds to analyze their rolling returns</p>
+            </section>
+
+            <section class="chart-section" id="chartSection" style="display: none;">
+                <div class="chart-header">
+                    <h2>5-Year Rolling Returns Chart</h2>
+                    <div class="chart-controls">
+                        <button id="downloadChartBtn" class="btn btn-download">Download Chart</button>
+                        <button id="exportBtn" class="btn btn-export">Export CSV</button>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="rollingReturnsChart"></canvas>
+                </div>
+            </section>
+
+            <section class="stats-section" id="statsSection" style="display: none;">
+                <h2>Statistics Summary</h2>
+                <div class="stats-table-container">
+                    <table id="statsTable" class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Fund Name</th>
+                                <th>Min (%)</th>
+                                <th>Max (%)</th>
+                                <th>Average (%)</th>
+                                <th>Std Dev</th>
+                                <th>Positive Periods (%)</th>
+                                <th>Total Periods</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statsTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- ===== Fund Rankings Tab ===== -->
+        <div class="tab-panel" id="rankingsPanel">
+            <div class="rankings-intro">
+                <h2>Top Funds by 5-Year Rolling Return Robustness</h2>
+                <p>Funds ranked by a robustness score that rewards high average returns, consistency, and downside protection. Classified by SEBI mutual fund categories.</p>
+                <div class="rankings-actions">
+                    <button id="loadRankingsBtn" class="btn btn-primary">Load Rankings</button>
+                    <button id="refreshRankingsBtn" class="btn btn-secondary" style="display:none;">Refresh</button>
+                </div>
+            </div>
+
+            <!-- Loading progress -->
+            <div id="rankingsLoading" class="rankings-loading" style="display:none;">
+                <div class="loading-spinner"></div>
+                <p>Analyzing funds across all categories...</p>
+                <p class="loading-subtext">This may take up to a minute on first load. Results are cached for subsequent visits.</p>
+            </div>
+
+            <!-- Results -->
+            <div id="rankingsContent" style="display:none;">
+                <!-- Auto-insights -->
+                <div class="insights-box" id="rankingsInsights"></div>
+
+                <!-- Rankings controls -->
+                <div class="rankings-controls">
+                    <div class="control-group">
+                        <label for="topNSelect">Show:</label>
+                        <select id="topNSelect" class="top-n-select">
+                            <option value="10">Top 10</option>
+                            <option value="20">Top 20</option>
+                            <option value="30">Top 30</option>
+                            <option value="50">Top 50</option>
+                            <option value="100">Top 100</option>
+                        </select>
+                    </div>
+                    <button id="downloadRankingsBtn" class="btn btn-export">Download CSV</button>
+                </div>
+
+                <!-- Category filter pills -->
+                <div class="category-filters" id="categoryFilters"></div>
+
+                <!-- Rankings table -->
+                <div class="rankings-table-container">
+                    <table class="rankings-table" id="rankingsTable">
+                        <thead>
+                            <tr>
+                                <th class="rank-col">#</th>
+                                <th class="name-col">Fund Name</th>
+                                <th class="cat-col">Category</th>
+                                <th class="num-col sortable" data-sort="avgReturn">Avg Return %</th>
+                                <th class="num-col sortable" data-sort="minReturn">Min %</th>
+                                <th class="num-col sortable" data-sort="maxReturn">Max %</th>
+                                <th class="num-col sortable" data-sort="stdDev">Std Dev</th>
+                                <th class="num-col sortable" data-sort="positivePercentage">Positive %</th>
+                                <th class="num-col sortable active-sort" data-sort="robustnessScore">Robustness</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rankingsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Methodology Tab ===== -->
+        <div class="tab-panel" id="methodologyPanel">
+            <div class="methodology-content">
+
+                <section class="method-section">
+                    <h2>How This Works</h2>
+                    <p>This tool analyzes Indian equity mutual funds by computing their <strong>5-year rolling returns</strong> and ranking them by a <strong>robustness score</strong> that captures not just how high the returns are, but how consistent and reliable they have been over time.</p>
+                </section>
+
+                <section class="method-section">
+                    <h2>1. Fund Universe</h2>
+                    <p>We analyze <strong>104 Direct Growth equity mutual funds</strong> across 11 SEBI-defined categories:</p>
+                    <div class="method-grid">
+                        <div class="method-card">
+                            <h4>Market Cap Based</h4>
+                            <ul>
+                                <li><strong>Large Cap</strong> — 10 funds (top 100 companies by market cap)</li>
+                                <li><strong>Large & Mid Cap</strong> — 10 funds</li>
+                                <li><strong>Mid Cap</strong> — 10 funds (101st-250th by market cap)</li>
+                                <li><strong>Small Cap</strong> — 11 funds (251st onwards)</li>
+                            </ul>
+                        </div>
+                        <div class="method-card">
+                            <h4>Diversified / Strategy</h4>
+                            <ul>
+                                <li><strong>Flexi Cap</strong> — 10 funds (flexible allocation)</li>
+                                <li><strong>Multi Cap</strong> — 6 funds (min 25% each in large/mid/small)</li>
+                                <li><strong>Value / Contra</strong> — 10 funds (contrarian or value investing)</li>
+                                <li><strong>Focused</strong> — 10 funds (max 30 stocks)</li>
+                            </ul>
+                        </div>
+                        <div class="method-card">
+                            <h4>Tax Saving & Others</h4>
+                            <ul>
+                                <li><strong>ELSS</strong> — 12 funds (3-year lock-in, 80C deduction)</li>
+                                <li><strong>Sectoral / Thematic</strong> — 8 funds (tech, banking, infra, etc.)</li>
+                                <li><strong>Index Funds</strong> — 7 funds (passive, tracks Nifty/Sensex)</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="method-note">
+                        <strong>Selection criteria:</strong> Only <em>Direct Growth</em> plans are included (no regular plans, no IDCW/dividend). Funds are chosen from top AMCs (SBI, HDFC, ICICI, Axis, Kotak, Mirae, Nippon, DSP, UTI, Canara Robeco, Franklin, Parag Parikh, Quant, Motilal Oswal, Tata, Aditya Birla, Edelweiss, Sundaram, PGIM, Bandhan, HSBC, Invesco, and more) to ensure diversity and avoid fund-house bias. Only funds with sufficient NAV history (&ge; 5 years of data) are included in rankings.
+                    </div>
+                </section>
+
+                <section class="method-section">
+                    <h2>2. Rolling Returns Calculation</h2>
+                    <p>For each fund, we compute the <strong>5-year CAGR (Compound Annual Growth Rate)</strong> at every available date in the fund's history.</p>
+                    <div class="method-formula">
+                        <div class="formula-box">
+                            <div class="formula-title">5-Year Rolling CAGR</div>
+                            <div class="formula">CAGR = ( NAV<sub>today</sub> / NAV<sub>5 years ago</sub> )<sup>1/5</sup> &minus; 1</div>
+                        </div>
+                    </div>
+                    <p>This is computed for <strong>every trading day</strong> where a matching NAV exists ~5 years prior (within a 15-day window). The result is a time series of 5-year returns — not a single number, but a full picture of how the fund performed across all 5-year windows in its history.</p>
+                    <div class="method-note">
+                        <strong>Why rolling returns?</strong> A single-point return (e.g., "this fund gave 18% over 5 years") is misleading because it depends entirely on when you entered and exited. Rolling returns show you what the return would have been if you had invested on <em>any</em> date and held for 5 years. This reveals consistency, not just peak performance.
+                    </div>
+                </section>
+
+                <section class="method-section">
+                    <h2>3. Statistical Metrics</h2>
+                    <p>From the rolling returns time series, we compute these statistics for each fund:</p>
+                    <table class="method-table">
+                        <thead>
+                            <tr><th>Metric</th><th>What It Tells You</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><strong>Average Return</strong></td><td>The mean 5-year CAGR across all rolling windows. Higher = better long-term wealth creation.</td></tr>
+                            <tr><td><strong>Minimum Return</strong></td><td>The worst 5-year return the fund ever delivered. Higher = better downside protection. A positive minimum means the fund <em>never</em> lost money over any 5-year period.</td></tr>
+                            <tr><td><strong>Maximum Return</strong></td><td>The best 5-year return. Shows the upside potential.</td></tr>
+                            <tr><td><strong>Standard Deviation</strong></td><td>How much the rolling returns vary. Lower = more predictable returns.</td></tr>
+                            <tr><td><strong>Positive Periods %</strong></td><td>What percentage of all 5-year windows gave positive returns. 100% means the fund has never delivered negative returns over any 5-year stretch.</td></tr>
+                        </tbody>
+                    </table>
+                </section>
+
+                <section class="method-section">
+                    <h2>4. Robustness Score</h2>
+                    <p>The rankings are sorted by a <strong>robustness score</strong> that combines multiple dimensions of performance into a single number:</p>
+                    <div class="method-formula">
+                        <div class="formula-box">
+                            <div class="formula-title">Robustness Score</div>
+                            <div class="formula">Score = (Avg Return &times; Positive%) / (1 + StdDev / 10)</div>
+                        </div>
+                    </div>
+                    <p>This score rewards funds that have:</p>
+                    <ul class="method-list">
+                        <li><strong>High average returns</strong> — the fund creates wealth over time</li>
+                        <li><strong>High positive period percentage</strong> — the fund rarely loses money over 5-year windows</li>
+                        <li><strong>Low standard deviation</strong> — the returns are consistent, not wildly swinging</li>
+                    </ul>
+                    <div class="method-note">
+                        <strong>Interpretation:</strong> A fund with 15% average return but wild swings (high std dev) and occasional negative 5-year periods will score lower than a fund with 13% average return that is rock-solid consistent. The score captures <em>reliability of wealth creation</em>, not just peak performance.
+                    </div>
+                </section>
+
+                <section class="method-section">
+                    <h2>5. Data Source</h2>
+                    <p>All NAV data comes from <a href="https://www.mfapi.in/" target="_blank">mfapi.in</a>, which provides historical NAV data for all AMFI-registered Indian mutual funds. The data is updated daily and goes back to each fund's inception date.</p>
+                    <p>Fund categorization uses the <strong>SEBI mutual fund categorization framework</strong> (October 2017), which standardized fund types across all AMCs in India.</p>
+                </section>
+
+                <section class="method-section">
+                    <h2>6. Limitations</h2>
+                    <ul class="method-list">
+                        <li><strong>Survivorship bias</strong> — Only currently active funds are analyzed. Funds that were merged or closed (likely poor performers) are excluded.</li>
+                        <li><strong>Past performance</strong> — Rolling returns are backward-looking. A high robustness score does not guarantee future returns.</li>
+                        <li><strong>Fund manager changes</strong> — A fund's track record may reflect a previous manager's skill, not the current one's.</li>
+                        <li><strong>AUM & liquidity</strong> — This analysis does not account for fund size, which can impact future performance (especially for small cap funds).</li>
+                        <li><strong>Expense ratios</strong> — NAV data is net of expenses, so the analysis implicitly accounts for costs. But Direct plans have lower costs than Regular plans.</li>
+                    </ul>
+                </section>
+
+            </div>
+        </div>
+
+        <footer>
+            <p>Data source: <a href="https://www.mfapi.in/" target="_blank">mfapi.in</a> |
+               Rolling returns show CAGR for each 5-year period</p>
+        </footer>
+    </div>
+
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <p>Loading data...</p>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
