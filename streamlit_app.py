@@ -248,9 +248,50 @@ def load_all_rankings():
     return results
 
 
+@st.cache_data(ttl=3600)
+def analyze_portfolio_fund(scheme_code):
+    """Fetch and fully analyze a single fund for portfolio review."""
+    try:
+        response = requests.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=30)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        nav_data = data.get('data', [])
+        meta = data.get('meta', {})
+        if not nav_data or not meta:
+            return None
+        rolling = calculate_rolling_returns(nav_data, years=5)
+        if not rolling or len(rolling) < 10:
+            return None
+        returns_values = [r['return'] for r in rolling]
+        avg = sum(returns_values) / len(returns_values)
+        std = math.sqrt(sum((x - avg) ** 2 for x in returns_values) / len(returns_values))
+        mn = min(returns_values)
+        mx = max(returns_values)
+        pos_pct = len([r for r in returns_values if r > 0]) / len(returns_values) * 100
+        robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+        return {
+            'schemeCode': scheme_code,
+            'schemeName': meta.get('scheme_name', 'Unknown'),
+            'category': normalize_category(meta.get('scheme_category', '')),
+            'fundHouse': meta.get('fund_house', 'Unknown'),
+            'avgReturn': round(avg, 2),
+            'minReturn': round(mn, 2),
+            'maxReturn': round(mx, 2),
+            'stdDev': round(std, 2),
+            'positivePercentage': round(pos_pct, 1),
+            'totalPeriods': len(returns_values),
+            'robustnessScore': round(robustness, 2),
+        }
+    except Exception:
+        return None
+
+
 # --- Session State ---
 if 'selected_funds' not in st.session_state:
     st.session_state.selected_funds = []
+if 'portfolio_funds' not in st.session_state:
+    st.session_state.portfolio_funds = []
 
 
 # --- Header ---
@@ -261,7 +302,7 @@ st.markdown(
 )
 
 # --- Tabs ---
-tab_analyzer, tab_rankings, tab_methodology = st.tabs(["🔍 Analyzer", "🏆 Fund Rankings", "📐 Methodology"])
+tab_analyzer, tab_rankings, tab_portfolio, tab_methodology = st.tabs(["🔍 Analyzer", "🏆 Fund Rankings", "📋 Portfolio Review", "📐 Methodology"])
 
 
 # ===================== ANALYZER TAB =====================
@@ -451,6 +492,267 @@ with tab_rankings:
         )
     else:
         st.info("Click **Load / Refresh Rankings** to analyze funds.")
+
+
+# ===================== PORTFOLIO REVIEW TAB =====================
+with tab_portfolio:
+    st.subheader("Portfolio Review & Swap Recommendations")
+    st.caption("Upload your current mutual fund holdings. We'll compare each fund against the top-ranked alternative in its SEBI category and recommend swaps with full rationale.")
+
+    # --- Input Section ---
+    input_method = st.radio("How would you like to add your portfolio?", ["Upload CSV", "Search & Add"], horizontal=True)
+
+    if input_method == "Upload CSV":
+        st.markdown("**CSV format:** One fund per row. First column = Scheme Code, second column (optional) = Investment Amount in ₹.")
+        sample_csv = "Scheme Code,Investment Amount\n122639,100000\n118989,50000\n119773,75000"
+        st.download_button("📥 Download Sample CSV", sample_csv, "sample_portfolio.csv", "text/csv")
+
+        uploaded = st.file_uploader("Upload your portfolio CSV", type=["csv"])
+        if uploaded:
+            try:
+                df_upload = pd.read_csv(uploaded)
+                df_upload.columns = [c.strip().lower().replace(' ', '_') for c in df_upload.columns]
+                # Find scheme code column
+                code_col = None
+                for col in df_upload.columns:
+                    if 'code' in col or 'scheme' in col:
+                        code_col = col
+                        break
+                if not code_col:
+                    code_col = df_upload.columns[0]
+                # Find amount column
+                amt_col = None
+                for col in df_upload.columns:
+                    if 'amount' in col or 'value' in col or 'invest' in col:
+                        amt_col = col
+                        break
+                codes = df_upload[code_col].astype(str).tolist()
+                amounts = df_upload[amt_col].tolist() if amt_col else [None] * len(codes)
+
+                st.markdown(f"Found **{len(codes)} funds** in CSV.")
+                if st.button("🔍 Analyze Portfolio", type="primary"):
+                    st.session_state.portfolio_funds = []
+                    progress = st.progress(0, text="Analyzing your portfolio...")
+                    for i, (code, amt) in enumerate(zip(codes, amounts)):
+                        data = analyze_portfolio_fund(code.strip())
+                        if data:
+                            data['amount'] = amt
+                            st.session_state.portfolio_funds.append(data)
+                        progress.progress((i + 1) / len(codes), text=f"Analyzing fund {i + 1}/{len(codes)}...")
+                    progress.empty()
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error reading CSV: {e}")
+    else:
+        query = st.text_input("Search fund to add", placeholder="e.g. HDFC Mid Cap, Parag Parikh, 122639...", key="portfolio_search")
+        if query and len(query) >= 2:
+            results = search_funds_api(query)
+            if results:
+                fund_options = {r['schemeName']: r for r in results}
+                selected = st.selectbox("Select fund:", list(fund_options.keys()), key="portfolio_select")
+                col_amt, col_btn = st.columns([3, 1])
+                with col_amt:
+                    amount = st.number_input("Investment amount (₹, optional)", min_value=0, value=0, key="portfolio_amt")
+                with col_btn:
+                    st.write("")
+                    if st.button("➕ Add", type="primary"):
+                        fund = fund_options[selected]
+                        code = fund['schemeCode']
+                        if any(f['schemeCode'] == code for f in st.session_state.portfolio_funds):
+                            st.warning("Already in portfolio.")
+                        else:
+                            with st.spinner("Analyzing fund..."):
+                                data = analyze_portfolio_fund(code)
+                            if data:
+                                data['amount'] = amount if amount > 0 else None
+                                st.session_state.portfolio_funds.append(data)
+                                st.rerun()
+                            else:
+                                st.error("Not enough historical data for 5-year rolling returns.")
+            elif query:
+                st.info("No funds found.")
+
+    # --- Portfolio Analysis & Recommendations ---
+    if st.session_state.portfolio_funds:
+        st.divider()
+        portfolio = st.session_state.portfolio_funds
+
+        # Clear button
+        if st.button("🗑️ Clear Portfolio"):
+            st.session_state.portfolio_funds = []
+            st.rerun()
+
+        # Portfolio summary table
+        st.markdown("### Your Portfolio")
+        port_rows = []
+        for f in portfolio:
+            row = {
+                'Fund Name': f['schemeName'].split(' -')[0].split(' Direct')[0],
+                'Category': f['category'],
+                'Avg Return %': f['avgReturn'],
+                'Min %': f['minReturn'],
+                'Std Dev': f['stdDev'],
+                'Positive %': f['positivePercentage'],
+                'Robustness': f['robustnessScore'],
+            }
+            if f.get('amount'):
+                row['Amount (₹)'] = f"{f['amount']:,.0f}"
+            port_rows.append(row)
+        st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
+
+        # Load rankings for comparison
+        rankings = load_all_rankings()
+        rankings_by_cat = {}
+        for f in rankings:
+            rankings_by_cat.setdefault(f['category'], []).append(f)
+
+        # --- Recommendations ---
+        st.markdown("### Recommendations")
+        health_scores = []
+        swaps_needed = 0
+        already_optimal = 0
+
+        for fund in portfolio:
+            cat = fund['category']
+            cat_funds = rankings_by_cat.get(cat, [])
+            fund_name = fund['schemeName'].split(' -')[0].split(' Direct')[0]
+
+            if not cat_funds:
+                st.warning(f"**{fund_name}** — No ranked funds in **{cat}** for comparison.")
+                continue
+
+            top_fund = cat_funds[0]
+
+            # Check if portfolio fund is in the top 3 for its category
+            fund_rank = None
+            for i, ranked in enumerate(cat_funds):
+                if ranked['schemeCode'] == fund['schemeCode']:
+                    fund_rank = i + 1
+                    break
+
+            # Health ratio
+            health = min(fund['robustnessScore'] / top_fund['robustnessScore'], 1.0) if top_fund['robustnessScore'] > 0 else 0
+            health_scores.append(health)
+
+            if fund_rank and fund_rank <= 3:
+                already_optimal += 1
+                st.success(f"**✅ {fund_name}** — Ranked **#{fund_rank} in {cat}**. No change needed. (Robustness: {fund['robustnessScore']})")
+            else:
+                swaps_needed += 1
+                top_name = top_fund['schemeName'].split(' -')[0].split(' Direct')[0]
+
+                with st.expander(f"🔄 **{fund_name}** → **{top_name}**", expanded=True):
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.markdown(f"##### Your Fund")
+                        st.markdown(f"**{fund_name}**")
+                        st.caption(f"{cat}")
+                        st.metric("Avg Return", f"{fund['avgReturn']}%")
+                        st.metric("Min Return", f"{fund['minReturn']}%")
+                        st.metric("Std Dev", f"{fund['stdDev']}")
+                        st.metric("Positive Periods", f"{fund['positivePercentage']}%")
+                        st.metric("Robustness Score", f"{fund['robustnessScore']}")
+
+                    with col2:
+                        st.markdown(f"##### Recommended (#{1} in {cat})")
+                        st.markdown(f"**{top_name}**")
+                        st.caption(f"{top_fund['fundHouse'].split(' Mutual')[0]}")
+                        ret_delta = round(top_fund['avgReturn'] - fund['avgReturn'], 1)
+                        st.metric("Avg Return", f"{top_fund['avgReturn']}%", delta=f"{ret_delta:+.1f}%")
+                        min_delta = round(top_fund['minReturn'] - fund['minReturn'], 1)
+                        st.metric("Min Return", f"{top_fund['minReturn']}%", delta=f"{min_delta:+.1f}%")
+                        std_delta = round(top_fund['stdDev'] - fund['stdDev'], 1)
+                        st.metric("Std Dev", f"{top_fund['stdDev']}", delta=f"{std_delta:.1f}", delta_color="inverse")
+                        pos_delta = round(top_fund['positivePercentage'] - fund['positivePercentage'], 1)
+                        st.metric("Positive Periods", f"{top_fund['positivePercentage']}%", delta=f"{pos_delta:+.1f}%")
+                        rob_delta = round(top_fund['robustnessScore'] - fund['robustnessScore'], 1)
+                        st.metric("Robustness Score", f"{top_fund['robustnessScore']}", delta=f"{rob_delta:+.1f}")
+
+                    # Rationale
+                    st.markdown("---")
+                    st.markdown("**Why switch?**")
+                    rationale = []
+                    if fund['robustnessScore'] > 0:
+                        rob_pct = round((top_fund['robustnessScore'] / fund['robustnessScore'] - 1) * 100)
+                        if rob_pct > 0:
+                            rationale.append(f"**{rob_pct}% higher robustness score** ({top_fund['robustnessScore']} vs {fund['robustnessScore']}) — more reliable wealth creation")
+                    if top_fund['avgReturn'] > fund['avgReturn']:
+                        rationale.append(f"**{ret_delta:+.1f}% higher average return** over rolling 5-year periods")
+                    if top_fund['minReturn'] > fund['minReturn']:
+                        rationale.append(f"**Better downside protection** — worst 5-year return: {top_fund['minReturn']}% vs {fund['minReturn']}%")
+                    if top_fund['stdDev'] < fund['stdDev']:
+                        rationale.append(f"**More consistent** — standard deviation of {top_fund['stdDev']} vs {fund['stdDev']}")
+                    if top_fund['positivePercentage'] > fund['positivePercentage']:
+                        rationale.append(f"**Positive in {top_fund['positivePercentage']}%** of 5-year periods vs {fund['positivePercentage']}%")
+                    if not rationale:
+                        rationale.append(f"Top-ranked fund in {cat} category with robustness score of {top_fund['robustnessScore']}")
+                    for point in rationale:
+                        st.markdown(f"- {point}")
+
+                    # Alternatives
+                    alts = [f for f in cat_funds[1:4] if f['schemeCode'] != fund['schemeCode']]
+                    if alts:
+                        alt_text = ", ".join(
+                            f"{f['schemeName'].split(' -')[0].split(' Direct')[0]} (Score: {f['robustnessScore']})"
+                            for f in alts
+                        )
+                        st.caption(f"Other strong options in {cat}: {alt_text}")
+
+        # --- Portfolio Health Score ---
+        if health_scores:
+            st.divider()
+            avg_health = sum(health_scores) / len(health_scores)
+            score = round(avg_health * 10, 1)
+
+            st.markdown("### Portfolio Health Score")
+            col_score, col_detail = st.columns([1, 3])
+            with col_score:
+                color = "🟢" if score >= 8 else "🟡" if score >= 6 else "🔴"
+                st.markdown(f"## {color} {score} / 10")
+            with col_detail:
+                st.metric("Funds Analyzed", len(portfolio))
+                st.metric("Already Optimal", f"{already_optimal}/{len(portfolio)}")
+                st.metric("Swaps Suggested", swaps_needed)
+
+            if score >= 8:
+                st.success("Your portfolio is **well-optimized** — most funds are top-ranked in their categories.")
+            elif score >= 6:
+                st.info("Your portfolio is **decent** but has room for improvement. Consider the swap recommendations above.")
+            else:
+                st.warning("Your portfolio has **significant room for optimization**. The recommended swaps could meaningfully improve your risk-adjusted returns.")
+
+            # Download recommendations
+            rec_rows = []
+            for fund in portfolio:
+                cat = fund['category']
+                cat_funds = rankings_by_cat.get(cat, [])
+                top = cat_funds[0] if cat_funds else None
+                fund_rank = None
+                if cat_funds:
+                    for i, r in enumerate(cat_funds):
+                        if r['schemeCode'] == fund['schemeCode']:
+                            fund_rank = i + 1
+                            break
+                rec_rows.append({
+                    'Current Fund': fund['schemeName'].split(' -')[0].split(' Direct')[0],
+                    'Category': cat,
+                    'Current Robustness': fund['robustnessScore'],
+                    'Current Avg Return %': fund['avgReturn'],
+                    'Action': f"Keep (Rank #{fund_rank})" if fund_rank and fund_rank <= 3 else "Consider Swap",
+                    'Recommended Fund': top['schemeName'].split(' -')[0].split(' Direct')[0] if top and (not fund_rank or fund_rank > 3) else '—',
+                    'Recommended Robustness': top['robustnessScore'] if top and (not fund_rank or fund_rank > 3) else '—',
+                    'Recommended Avg Return %': top['avgReturn'] if top and (not fund_rank or fund_rank > 3) else '—',
+                })
+            rec_df = pd.DataFrame(rec_rows)
+            st.download_button(
+                "📥 Download Recommendations CSV",
+                rec_df.to_csv(index=False),
+                f"portfolio_recommendations_{datetime.now().strftime('%Y%m%d')}.csv",
+                "text/csv",
+            )
+    else:
+        st.info("Upload a CSV or search and add funds above to get personalized swap recommendations.")
 
 
 # ===================== METHODOLOGY TAB =====================
