@@ -152,6 +152,81 @@ def normalize_category(scheme_category):
     return "Other"
 
 
+def get_fine_category(fund_name, scheme_category=''):
+    """Return a granular category by analyzing the fund name and API category.
+
+    This prevents unrelated funds (Gold vs Liquid vs Nasdaq) from being
+    grouped together just because the API calls them all 'Other Scheme'.
+    """
+    name = fund_name.lower()
+    cat = (scheme_category or '').lower()
+
+    # --- Non-equity / Non-domestic (check name first, more reliable) ---
+    if any(w in name for w in ['gold fund', 'gold etf', 'gold direct', 'gold and silver', 'silver fund', 'silver etf']):
+        return 'Gold'
+    if any(w in name for w in ['liquid fund', 'liquid plan', 'money market', 'overnight fund']):
+        return 'Liquid'
+    if 'arbitrage' in name:
+        return 'Arbitrage'
+    if any(w in name for w in ['corporate bond', 'credit risk', 'gilt fund', 'government sec', 'g-sec']):
+        return 'Debt - Corporate Bond'
+    if any(w in name for w in ['short term', 'short duration', 'low duration', 'ultra short']):
+        return 'Debt - Short Duration'
+    if any(w in name for w in ['medium duration', 'medium to long', 'long duration', 'dynamic bond']):
+        return 'Debt - Medium/Long Duration'
+    if 'income' in name and 'equity' not in name and ('fund' in name or 'plus' in name):
+        return 'Debt'
+
+    # Hybrid sub-types
+    if 'multi asset' in name:
+        return 'Hybrid - Multi Asset'
+    if 'balanced advantage' in name or 'dynamic asset' in name:
+        return 'Hybrid - Balanced Advantage'
+    if 'equity savings' in name:
+        return 'Hybrid - Equity Savings'
+    if 'conservative' in name and ('hybrid' in name or 'hybrid' in cat):
+        return 'Hybrid - Conservative'
+    if 'aggressive' in name and 'hybrid' in cat:
+        return 'Hybrid - Aggressive'
+
+    # Catch remaining non-equity by API category
+    if 'hybrid' in cat or 'arbitrage' in cat:
+        return 'Hybrid'
+    if 'debt' in cat or 'bond' in cat or 'gilt' in cat or 'liquid' in cat or 'money market' in cat or 'duration' in cat or 'floating' in cat:
+        return 'Debt'
+    if 'commodit' in cat or 'gold' in cat or 'silver' in cat:
+        return 'Gold'
+
+    # International / Global
+    if any(w in name for w in ['nasdaq', 'nyse', 'fang+', 'international', 'global equity',
+                                'us equity', 'us opportunities', 'america', 'china', 'japan',
+                                'emerging market', 'world fund', 'global select']):
+        return 'International'
+    if 'fof' in cat and 'domestic' not in cat:
+        return 'International'
+
+    # --- Sectoral / Thematic — by actual sector ---
+    if any(w in name for w in ['technology', 'tech fund', 'digital india', 'digital fund', 'it fund']):
+        return 'Sectoral - Technology'
+    if any(w in name for w in ['banking', 'financial services', 'financial service']):
+        return 'Sectoral - Banking & Financial'
+    if any(w in name for w in ['infrastructure', 'infra fund', 'economic reform']):
+        return 'Sectoral - Infrastructure'
+    if any(w in name for w in ['consumption', 'consumer', 'fmcg']):
+        return 'Sectoral - Consumption'
+    if any(w in name for w in ['healthcare', 'health fund', 'pharma']):
+        return 'Sectoral - Healthcare'
+    if any(w in name for w in ['energy', 'resources & energy', 'resources and energy', 'power fund']):
+        return 'Sectoral - Energy'
+    if any(w in name for w in ['manufacturing', 'make in india']):
+        return 'Sectoral - Manufacturing'
+    if 'thematic' in cat or 'sectoral' in cat:
+        return 'Sectoral / Thematic'
+
+    # --- Standard equity (broad category is fine) ---
+    return normalize_category(scheme_category)
+
+
 # --- Cached API Functions ---
 
 @st.cache_data(ttl=3600)
@@ -232,10 +307,13 @@ def load_all_rankings():
             mx = max(returns_values)
             pos_pct = len([r for r in returns_values if r > 0]) / len(returns_values) * 100
             robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+            scheme_name = meta.get('scheme_name', 'Unknown')
+            scheme_cat = meta.get('scheme_category', '')
             return {
                 'schemeCode': scheme_code,
-                'schemeName': meta.get('scheme_name', 'Unknown'),
-                'category': normalize_category(meta.get('scheme_category', '')),
+                'schemeName': scheme_name,
+                'category': normalize_category(scheme_cat),
+                'fineCategory': get_fine_category(scheme_name, scheme_cat),
                 'fundHouse': meta.get('fund_house', 'Unknown'),
                 'avgReturn': round(avg, 2),
                 'minReturn': round(mn, 2),
@@ -281,10 +359,13 @@ def analyze_portfolio_fund(scheme_code):
         mx = max(returns_values)
         pos_pct = len([r for r in returns_values if r > 0]) / len(returns_values) * 100
         robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+        scheme_name = meta.get('scheme_name', 'Unknown')
+        scheme_cat = meta.get('scheme_category', '')
         return {
             'schemeCode': scheme_code,
-            'schemeName': meta.get('scheme_name', 'Unknown'),
-            'category': normalize_category(meta.get('scheme_category', '')),
+            'schemeName': scheme_name,
+            'category': normalize_category(scheme_cat),
+            'fineCategory': get_fine_category(scheme_name, scheme_cat),
             'fundHouse': meta.get('fund_house', 'Unknown'),
             'avgReturn': round(avg, 2),
             'minReturn': round(mn, 2),
@@ -766,7 +847,7 @@ with tab_portfolio:
         for f in portfolio:
             row = {
                 'Fund Name': f['schemeName'].split(' -')[0].split(' Direct')[0],
-                'Category': f['category'],
+                'Category': f.get('fineCategory', f['category']),
                 'Avg Return %': f['avgReturn'],
                 'Min %': f['minReturn'],
                 'Std Dev': f['stdDev'],
@@ -782,11 +863,14 @@ with tab_portfolio:
             port_rows.append(row)
         st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
 
-        # Load rankings for comparison
+        # Load rankings for comparison — index by both broad and fine category
         rankings = load_all_rankings()
         rankings_by_cat = {}
+        rankings_by_fine = {}
         for f in rankings:
             rankings_by_cat.setdefault(f['category'], []).append(f)
+            fine = f.get('fineCategory', f['category'])
+            rankings_by_fine.setdefault(fine, []).append(f)
 
         # --- Recommendations ---
         st.markdown("### Recommendations")
@@ -795,16 +879,27 @@ with tab_portfolio:
         already_optimal = 0
 
         for fund in portfolio:
+            fine_cat = fund.get('fineCategory', fund['category'])
             cat = fund['category']
-            cat_funds = rankings_by_cat.get(cat, [])
             fund_name = fund['schemeName'].split(' -')[0].split(' Direct')[0]
 
-            # Skip non-equity categories — our rankings are equity-only
-            non_equity = {"Hybrid", "Debt", "Commodities", "International / FoF", "Other"}
-            if cat in non_equity or not cat_funds:
+            # Skip non-equity / non-domestic categories
+            NON_COMPARABLE = ('Hybrid', 'Debt', 'Gold', 'Liquid', 'Arbitrage', 'International', 'Commodities')
+            if fine_cat.startswith(NON_COMPARABLE) or fine_cat == 'Other':
                 already_optimal += 1
-                health_scores.append(1.0)  # don't penalize non-equity holdings
-                st.info(f"**ℹ️ {fund_name}** — **{cat}** fund. Our rankings cover domestic equity funds only, so no like-for-like comparison available.")
+                health_scores.append(1.0)
+                st.info(f"**ℹ️ {fund_name}** — **{fine_cat}** fund. Our rankings cover domestic equity funds only, so no like-for-like comparison available.")
+                continue
+
+            # Find comparable funds: try fine category first, then broad category
+            cat_funds = rankings_by_fine.get(fine_cat, [])
+            if not cat_funds:
+                cat_funds = rankings_by_cat.get(cat, [])
+
+            if not cat_funds:
+                already_optimal += 1
+                health_scores.append(1.0)
+                st.info(f"**ℹ️ {fund_name}** — **{fine_cat}**. No comparable ranked funds in this specific category.")
                 continue
 
             top_fund = cat_funds[0]
@@ -839,7 +934,7 @@ with tab_portfolio:
                     with col1:
                         st.markdown(f"##### Your Fund")
                         st.markdown(f"**{fund_name}**")
-                        st.caption(f"{cat}")
+                        st.caption(f"{fine_cat}")
                         st.metric("Avg Return", f"{fund['avgReturn']}%")
                         st.metric("Min Return", f"{fund['minReturn']}%")
                         st.metric("Std Dev", f"{fund['stdDev']}")
@@ -847,7 +942,7 @@ with tab_portfolio:
                         st.metric("Robustness Score", f"{fund['robustnessScore']}")
 
                     with col2:
-                        st.markdown(f"##### Recommended (#{1} in {cat})")
+                        st.markdown(f"##### Recommended (#{1} in {fine_cat})")
                         st.markdown(f"**{top_name}**")
                         st.caption(f"{top_fund['fundHouse'].split(' Mutual')[0]}")
                         ret_delta = round(top_fund['avgReturn'] - fund['avgReturn'], 1)
@@ -915,11 +1010,11 @@ with tab_portfolio:
                 st.warning("Your portfolio has **significant room for optimization**. The recommended swaps could meaningfully improve your risk-adjusted returns.")
 
         # --- Consolidation Analysis ---
-        # Group portfolio funds by category and flag over-diversification
+        # Group portfolio funds by FINE category to avoid comparing unrelated funds
         from collections import defaultdict
         cat_holdings = defaultdict(list)
         for fund in portfolio:
-            cat_holdings[fund['category']].append(fund)
+            cat_holdings[fund.get('fineCategory', fund['category'])].append(fund)
 
         # Find categories with 2+ funds
         over_diversified = {cat: funds for cat, funds in cat_holdings.items() if len(funds) >= 2}
@@ -939,7 +1034,7 @@ with tab_portfolio:
                 funds_sorted = sorted(funds, key=lambda f: f['robustnessScore'], reverse=True)
 
                 # For the recommended "keep" list: also consider if a ranked fund is better than all held funds
-                cat_ranked = rankings_by_cat.get(cat, [])
+                cat_ranked = rankings_by_fine.get(cat, rankings_by_cat.get(cat, []))
                 best_ranked = cat_ranked[0] if cat_ranked else None
 
                 # Decide how many to keep: 1 for most categories, 2 if large allocation
@@ -1086,7 +1181,7 @@ with tab_portfolio:
                             break
                 rec_rows.append({
                     'Current Fund': fund['schemeName'].split(' -')[0].split(' Direct')[0],
-                    'Category': cat,
+                    'Category': fund.get('fineCategory', cat),
                     'Current Robustness': fund['robustnessScore'],
                     'Current Avg Return %': fund['avgReturn'],
                     'Action': ("Keep" if (fund_rank and fund_rank <= 3) or (top and top['robustnessScore'] <= fund['robustnessScore']) else "Consider Swap"),
