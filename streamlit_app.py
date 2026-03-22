@@ -571,6 +571,8 @@ if 'portfolio_funds' not in st.session_state:
     st.session_state.portfolio_funds = []
 if 'portfolio_unmatched' not in st.session_state:
     st.session_state.portfolio_unmatched = []
+if 'portfolio_file_id' not in st.session_state:
+    st.session_state.portfolio_file_id = None
 
 
 # --- Header ---
@@ -784,46 +786,54 @@ with tab_portfolio:
         help="Supported: PDF/CSV/Excel from Groww, Kuvera, MFCentral, CAMS, Karvy, or any broker.",
     )
 
-    if uploaded and not st.session_state.portfolio_funds:
-        # Extract holdings from file
-        with st.spinner("Extracting holdings from your statement..."):
-            raw_holdings = extract_holdings(uploaded)
+    if uploaded:
+        # Detect new file — clear old results automatically
+        file_id = f"{uploaded.name}_{uploaded.size}"
+        if file_id != st.session_state.portfolio_file_id:
+            st.session_state.portfolio_funds = []
+            st.session_state.portfolio_unmatched = []
+            st.session_state.portfolio_file_id = file_id
 
-        if not raw_holdings:
-            st.error("Could not extract holdings from this file. Please make sure it contains a table with fund names.")
-        else:
-            holdings = consolidate_holdings(raw_holdings)
-            st.success(f"Found **{len(raw_holdings)} entries** → **{len(holdings)} unique funds** after consolidating duplicate folios.")
+        if not st.session_state.portfolio_funds:
+            # Extract holdings from file
+            with st.spinner("Extracting holdings from your statement..."):
+                raw_holdings = extract_holdings(uploaded)
 
-            if st.button("🔍 Analyze Portfolio & Get Recommendations", type="primary"):
-                all_schemes = get_all_schemes()
-                portfolio_results = []
-                unmatched_funds = []
-                progress = st.progress(0, text="Matching and analyzing your funds...")
+            if not raw_holdings:
+                st.error("Could not extract holdings from this file. Please make sure it contains a table with fund names.")
+            else:
+                holdings = consolidate_holdings(raw_holdings)
+                st.success(f"Found **{len(raw_holdings)} entries** → **{len(holdings)} unique funds** after consolidating duplicate folios.")
 
-                for i, h in enumerate(holdings):
-                    scheme, confidence = match_fund_to_scheme(h['name'], all_schemes)
-                    if scheme:
-                        code = str(scheme['schemeCode'])
-                        data = analyze_portfolio_fund(code)
-                        if data:
-                            data['amount'] = h.get('invested')
-                            data['current'] = h.get('current')
-                            data['original_name'] = h['name']
-                            data['match_confidence'] = confidence
-                            data['original_category'] = h.get('category', '')
-                            data['original_subcategory'] = h.get('subcategory', '')
-                            portfolio_results.append(data)
+                if st.button("🔍 Analyze Portfolio & Get Recommendations", type="primary"):
+                    all_schemes = get_all_schemes()
+                    portfolio_results = []
+                    unmatched_funds = []
+                    progress = st.progress(0, text="Matching and analyzing your funds...")
+
+                    for i, h in enumerate(holdings):
+                        scheme, confidence = match_fund_to_scheme(h['name'], all_schemes)
+                        if scheme:
+                            code = str(scheme['schemeCode'])
+                            data = analyze_portfolio_fund(code)
+                            if data:
+                                data['amount'] = h.get('invested')
+                                data['current'] = h.get('current')
+                                data['original_name'] = h['name']
+                                data['match_confidence'] = confidence
+                                data['original_category'] = h.get('category', '')
+                                data['original_subcategory'] = h.get('subcategory', '')
+                                portfolio_results.append(data)
+                            else:
+                                unmatched_funds.append(h['name'])
                         else:
                             unmatched_funds.append(h['name'])
-                    else:
-                        unmatched_funds.append(h['name'])
-                    progress.progress((i + 1) / len(holdings), text=f"Analyzing fund {i + 1}/{len(holdings)}...")
+                        progress.progress((i + 1) / len(holdings), text=f"Analyzing fund {i + 1}/{len(holdings)}...")
 
-                progress.empty()
-                st.session_state.portfolio_funds = portfolio_results
-                st.session_state.portfolio_unmatched = unmatched_funds
-                st.rerun()
+                    progress.empty()
+                    st.session_state.portfolio_funds = portfolio_results
+                    st.session_state.portfolio_unmatched = unmatched_funds
+                    st.rerun()
 
     # --- Portfolio Analysis & Recommendations ---
     if st.session_state.portfolio_funds:
@@ -833,6 +843,7 @@ with tab_portfolio:
         if st.button("🗑️ Clear & Upload New Statement"):
             st.session_state.portfolio_funds = []
             st.session_state.portfolio_unmatched = []
+            st.session_state.portfolio_file_id = None
             st.rerun()
 
         # Show unmatched funds
