@@ -1249,6 +1249,7 @@ with tab_pms:
             {"Provider": "Invesco", "Strategy": "DAWN / RISE", "Approach": "Multi-Strategy", "Inception": 2016, "SI CAGR %": None, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "Flat 10% profit share (lowest in industry)", "AUM (₹ Cr)": 20178},
             {"Provider": "Valentis", "Strategy": "Rising Star Opportunity", "Approach": "Small Cap", "Inception": 2016, "SI CAGR %": None, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% + 15% > 10% hurdle", "AUM (₹ Cr)": 1685},
             {"Provider": "Kotak", "Strategy": "Special Situations Value", "Approach": "Special Situations", "Inception": None, "SI CAGR %": None, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "2.5% or 1.5% + 15% > 10%", "AUM (₹ Cr)": 1767},
+            {"Provider": "Counter Cyclical", "Strategy": "Diversified Long Term Value", "Approach": "Small Cap Value", "Inception": 2019, "SI CAGR %": None, "5Y CAGR %": None, "3Y CAGR %": None, "Fee Model": "0% fixed + 20% > 10% hurdle (no mgmt fee)", "AUM (₹ Cr)": 793},
         ]
 
         df_pms = pd.DataFrame(pms_data)
