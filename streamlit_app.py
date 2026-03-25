@@ -285,8 +285,8 @@ def get_fund_rolling_returns(scheme_code, years=5):
 
 
 @st.cache_data(ttl=3600, show_spinner="Analyzing 104 funds across all SEBI categories... This takes about a minute on first load.")
-def load_all_rankings():
-    """Fetch and rank all funds in the universe."""
+def load_all_rankings(years=5):
+    """Fetch and rank all funds in the universe for a given rolling period."""
     def process_fund(scheme_code):
         try:
             response = requests.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=20)
@@ -297,7 +297,7 @@ def load_all_rankings():
             meta = data.get('meta', {})
             if not nav_data or not meta:
                 return None
-            rolling = calculate_rolling_returns(nav_data, years=5)
+            rolling = calculate_rolling_returns(nav_data, years=years)
             if not rolling or len(rolling) < 10:
                 return None
             returns_values = [r['return'] for r in rolling]
@@ -695,17 +695,19 @@ with tab_analyzer:
 
 # ===================== RANKINGS TAB =====================
 with tab_rankings:
-    st.subheader("Top Funds by 5-Year Rolling Return Robustness")
-    st.caption("Funds ranked by a robustness score that rewards high average returns, consistency, and downside protection.")
-
-    col_top, col_spacer = st.columns([2, 8])
+    col_period, col_top, col_spacer = st.columns([2, 2, 6])
+    with col_period:
+        rolling_years = st.selectbox("Rolling Period", [3, 5], index=1, key="rolling_years", format_func=lambda x: f"{x}-Year Rolling")
     with col_top:
         top_n = st.selectbox("Show", [10, 20, 30, 50, 100], index=0, key="top_n_select")
+
+    st.subheader(f"Top Funds by {rolling_years}-Year Rolling Return Robustness")
+    st.caption("Funds ranked by a robustness score that rewards high average returns, consistency, and downside protection.")
 
     if st.button("🔄 Load / Refresh Rankings", type="primary"):
         st.cache_data.clear()
 
-    rankings = load_all_rankings()
+    rankings = load_all_rankings(years=rolling_years)
 
     if rankings:
         # Category filter
@@ -768,7 +770,7 @@ with tab_rankings:
         st.download_button(
             "📥 Download Rankings CSV",
             csv_data,
-            f"fund_rankings_top{top_n}_{datetime.now().strftime('%Y%m%d')}.csv",
+            f"fund_rankings_{rolling_years}Y_top{top_n}_{datetime.now().strftime('%Y%m%d')}.csv",
             "text/csv",
         )
     else:
