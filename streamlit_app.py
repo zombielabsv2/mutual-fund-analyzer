@@ -522,20 +522,15 @@ def get_fine_category(fund_name, scheme_category=''):
 # --- Cached API Functions ---
 
 def search_funds_api(query):
-    """Search mutual funds by name or code. Uses cached get_all_schemes()."""
-    all_funds = get_all_schemes()
-    if not all_funds:
+    """Search mutual funds using mfapi.in search endpoint."""
+    try:
+        response = requests.get(f"{MFAPI_BASE_URL}/search?q={query}", timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        return [{'schemeCode': str(f.get('schemeCode', '')), 'schemeName': f.get('schemeName', '')}
+                for f in data[:20]]
+    except Exception:
         return []
-    q = query.lower()
-    results = []
-    for fund in all_funds:
-        code = str(fund.get('schemeCode', ''))
-        name = fund.get('schemeName', '')
-        if q in name.lower() or q in code:
-            results.append({'schemeCode': code, 'schemeName': name})
-        if len(results) >= 20:
-            break
-    return results
 
 
 @st.cache_data(ttl=3600)
