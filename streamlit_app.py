@@ -239,6 +239,137 @@ def calculate_sip_rolling_returns(nav_data, years=5, monthly_amount=10000):
     return results
 
 
+def simulate_historical_sip(nav_data, monthly_amount=10000, start_date=None, end_date=None):
+    """Simulate a historical SIP using actual NAV data.
+
+    Returns dict with:
+        monthly: list of {date, nav, units_bought, total_units, invested, value}
+        summary: {total_invested, final_value, wealth_gained, xirr, total_months}
+        fd_comparison: {value_at_7pct} — what a 7% FD would have returned
+    """
+    if not nav_data:
+        return None
+
+    parsed = []
+    for item in nav_data:
+        try:
+            dt = datetime.strptime(item['date'], '%d-%m-%Y')
+            nav = float(item['nav'])
+            if nav > 0:
+                parsed.append((dt, nav))
+        except (KeyError, ValueError):
+            continue
+    if len(parsed) < 2:
+        return None
+    parsed.sort(key=lambda x: x[0])
+    nav_lookup = {d: n for d, n in parsed}
+
+    data_start = parsed[0][0]
+    data_end = parsed[-1][0]
+
+    if start_date is None:
+        start_date = data_start
+    if end_date is None:
+        end_date = data_end
+
+    # Clamp to available data
+    start_date = max(start_date, data_start)
+    end_date = min(end_date, data_end)
+
+    if start_date >= end_date:
+        return None
+
+    # Simulate month by month
+    monthly = []
+    cashflows = []
+    total_units = 0.0
+    total_invested = 0.0
+    current = datetime(start_date.year, start_date.month, 1)
+
+    while current <= end_date:
+        # Find nearest trading day NAV (within 8 days)
+        best_nav = None
+        best_date = None
+        for delta in range(0, 8):
+            check = current + timedelta(days=delta)
+            if check in nav_lookup:
+                best_nav = nav_lookup[check]
+                best_date = check
+                break
+
+        if best_nav and best_date <= end_date:
+            units = monthly_amount / best_nav
+            total_units += units
+            total_invested += monthly_amount
+            current_value = total_units * best_nav
+            cashflows.append((best_date, -monthly_amount))
+
+            monthly.append({
+                'date': best_date.strftime('%Y-%m-%d'),
+                'nav': round(best_nav, 4),
+                'units_bought': round(units, 4),
+                'total_units': round(total_units, 4),
+                'invested': round(total_invested),
+                'value': round(current_value),
+            })
+
+        # Next month
+        if current.month == 12:
+            current = datetime(current.year + 1, 1, 1)
+        else:
+            current = datetime(current.year, current.month + 1, 1)
+
+    if not monthly or total_units == 0:
+        return None
+
+    # Final value using last available NAV
+    final_nav = parsed[-1][1]
+    final_value = total_units * final_nav
+    wealth_gained = final_value - total_invested
+
+    # Update last month's value to reflect actual end NAV
+    for m in monthly:
+        m['value'] = round(float(m['total_units']) * final_nav)
+
+    # Recalculate value at each month using that month's latest NAV
+    # (we need the value progression chart, so use the NAV on each SIP date)
+    running_units = 0.0
+    for m in monthly:
+        running_units += m['units_bought']
+        # Find NAV on this date
+        dt = datetime.strptime(m['date'], '%Y-%m-%d')
+        m['value'] = round(running_units * nav_lookup.get(dt, m['nav']))
+
+    # XIRR
+    cashflows.append((data_end, final_value))
+    rate = xirr(cashflows)
+
+    # FD comparison: 7% annual compounding, monthly deposits
+    fd_value = 0.0
+    monthly_fd_rate = (1.07 ** (1 / 12)) - 1
+    n_months = len(monthly)
+    for i in range(n_months):
+        months_remaining = n_months - i
+        fd_value += monthly_amount * ((1 + monthly_fd_rate) ** months_remaining)
+
+    # Nifty 50 comparison not computed here — caller can do it with the same function
+
+    return {
+        'monthly': monthly,
+        'summary': {
+            'total_invested': round(total_invested),
+            'final_value': round(final_value),
+            'wealth_gained': round(wealth_gained),
+            'xirr': round(rate * 100, 2) if rate is not None else None,
+            'absolute_return': round((final_value / total_invested - 1) * 100, 1) if total_invested > 0 else 0,
+            'total_months': len(monthly),
+        },
+        'fd_comparison': {
+            'value_at_7pct': round(fd_value),
+        },
+    }
+
+
 def calculate_trailing_returns(nav_data):
     """Calculate 1Y, 3Y, 5Y point-to-point CAGR from NAV data."""
     if not nav_data:
@@ -814,7 +945,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Tabs ---
-tab_analyzer, tab_rankings, tab_portfolio, tab_pms, tab_methodology = st.tabs(["🔍 Analyzer", "🏆 Fund Rankings", "📋 Portfolio Review", "💎 PMS & AIF", "📐 Methodology"])
+tab_analyzer, tab_rankings, tab_sip_sim, tab_portfolio, tab_pms, tab_methodology = st.tabs(["🔍 Analyzer", "🏆 Fund Rankings", "💰 SIP Simulator", "📋 Portfolio Review", "💎 PMS & AIF", "📐 Methodology"])
 
 
 # ===================== ANALYZER TAB =====================
@@ -1092,6 +1223,172 @@ with tab_rankings:
         )
     else:
         st.info("Click **Load / Refresh Rankings** to analyze funds.")
+
+
+# ===================== SIP SIMULATOR TAB =====================
+with tab_sip_sim:
+    st.subheader("What If I Had Invested via SIP?")
+    st.caption("See what your money would have grown to with a monthly SIP in any mutual fund, using actual historical NAV data.")
+
+    sip_query = st.text_input("Search for a fund", placeholder="e.g. Parag Parikh Flexi Cap, HDFC Mid Cap, 122639...", key="sip_search")
+
+    sip_fund_code = None
+    sip_fund_name = None
+
+    if sip_query and len(sip_query) >= 2:
+        sip_results = search_funds_api(sip_query)
+        if sip_results:
+            sip_options = {r['schemeName']: r['schemeCode'] for r in sip_results}
+            sip_selected = st.selectbox("Select fund:", list(sip_options.keys()), key="sip_fund_select")
+            sip_fund_code = sip_options[sip_selected]
+            sip_fund_name = sip_selected
+        else:
+            st.info("No funds found. Try a different search term.")
+
+    col_amt, col_start, col_end = st.columns(3)
+    with col_amt:
+        sip_amount = st.number_input("Monthly SIP (₹)", min_value=500, max_value=1000000, value=10000, step=500, key="sip_amount")
+    with col_start:
+        sip_start_year = st.number_input("Start Year", min_value=2000, max_value=2026, value=2015, key="sip_start")
+    with col_end:
+        sip_end_year = st.number_input("End Year", min_value=2001, max_value=2026, value=2026, key="sip_end")
+
+    if sip_fund_code and sip_start_year < sip_end_year:
+        if st.button("🚀 Simulate SIP", type="primary"):
+            with st.spinner(f"Simulating ₹{sip_amount:,}/month SIP from {sip_start_year} to {sip_end_year}..."):
+                try:
+                    response = requests.get(f"{MFAPI_BASE_URL}/{sip_fund_code}", timeout=30)
+                    response.raise_for_status()
+                    data = response.json()
+                    nav_data = data.get('data', [])
+
+                    start_dt = datetime(sip_start_year, 1, 1)
+                    end_dt = datetime(sip_end_year, 12, 31)
+
+                    result = simulate_historical_sip(nav_data, sip_amount, start_dt, end_dt)
+
+                    # Also simulate Nifty 50 for comparison
+                    nifty_response = requests.get(f"{MFAPI_BASE_URL}/120716", timeout=30)
+                    nifty_result = None
+                    if nifty_response.status_code == 200:
+                        nifty_nav = nifty_response.json().get('data', [])
+                        nifty_result = simulate_historical_sip(nifty_nav, sip_amount, start_dt, end_dt)
+
+                    if result:
+                        st.session_state.sip_sim_result = result
+                        st.session_state.sip_sim_nifty = nifty_result
+                        st.session_state.sip_sim_fund_name = sip_fund_name
+                        st.session_state.sip_sim_amount = sip_amount
+                        st.rerun()
+                    else:
+                        st.error("Not enough NAV data for the selected period. Try different dates.")
+                except Exception as e:
+                    st.error(f"Error fetching data: {e}")
+
+    # --- Display Results ---
+    if st.session_state.get('sip_sim_result'):
+        result = st.session_state.sip_sim_result
+        nifty_result = st.session_state.get('sip_sim_nifty')
+        fund_name = st.session_state.get('sip_sim_fund_name', 'Fund').split(' -')[0].split(' Direct')[0]
+        sip_amt = st.session_state.get('sip_sim_amount', 10000)
+        s = result['summary']
+        fd = result['fd_comparison']
+
+        # --- Hero metrics ---
+        st.markdown(f"### {fund_name}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Invested", f"₹{s['total_invested']:,.0f}")
+        c2.metric("Current Value", f"₹{s['final_value']:,.0f}")
+        c3.metric("Wealth Gained", f"₹{s['wealth_gained']:,.0f}",
+                   delta=f"{s['absolute_return']:+.1f}%")
+        c4.metric("SIP XIRR", f"{s['xirr']}%" if s['xirr'] is not None else "—")
+
+        # --- Comparison bar ---
+        st.markdown("### How does it compare?")
+        comp_cols = st.columns(3)
+        comp_cols[0].metric(f"Your SIP ({fund_name[:20]})", f"₹{s['final_value']:,.0f}")
+        comp_cols[1].metric("FD @ 7%", f"₹{fd['value_at_7pct']:,.0f}",
+                            delta=f"₹{s['final_value'] - fd['value_at_7pct']:+,.0f} vs Fund")
+        if nifty_result:
+            ns = nifty_result['summary']
+            comp_cols[2].metric("Nifty 50 SIP", f"₹{ns['final_value']:,.0f}",
+                                delta=f"₹{s['final_value'] - ns['final_value']:+,.0f} vs Fund")
+
+        # --- Growth Chart ---
+        st.markdown("### Growth Over Time")
+        monthly = result['monthly']
+        fig = go.Figure()
+
+        # Invested line
+        fig.add_trace(go.Scatter(
+            x=[m['date'] for m in monthly],
+            y=[m['invested'] for m in monthly],
+            name='Total Invested',
+            mode='lines',
+            line=dict(color='#9e9e9e', width=2, dash='dot'),
+            fill='tozeroy',
+            fillcolor='rgba(158,158,158,0.1)',
+            hovertemplate='%{x}<br>Invested: ₹%{y:,.0f}<extra></extra>',
+        ))
+
+        # Fund value line
+        fig.add_trace(go.Scatter(
+            x=[m['date'] for m in monthly],
+            y=[m['value'] for m in monthly],
+            name=fund_name[:25],
+            mode='lines',
+            line=dict(color='#1a237e', width=2.5),
+            fill='tonexty',
+            fillcolor='rgba(26,35,126,0.1)',
+            hovertemplate='%{x}<br>Value: ₹%{y:,.0f}<extra></extra>',
+        ))
+
+        # Nifty 50 comparison
+        if nifty_result and nifty_result.get('monthly'):
+            nm = nifty_result['monthly']
+            fig.add_trace(go.Scatter(
+                x=[m['date'] for m in nm],
+                y=[m['value'] for m in nm],
+                name='Nifty 50 SIP',
+                mode='lines',
+                line=dict(color='#c62828', width=1.5, dash='dash'),
+                hovertemplate='%{x}<br>Nifty 50: ₹%{y:,.0f}<extra></extra>',
+            ))
+
+        fig.update_layout(
+            yaxis_title='Value (₹)',
+            xaxis_title='Date',
+            hovermode='x unified',
+            legend=dict(orientation='h', y=-0.12),
+            margin=dict(t=20, b=60),
+            height=450,
+            yaxis_tickformat=',',
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # --- Monthly Breakdown ---
+        with st.expander("Monthly Breakdown", expanded=False):
+            df_monthly = pd.DataFrame(monthly)
+            df_monthly.columns = ['Date', 'NAV', 'Units Bought', 'Total Units', 'Invested (₹)', 'Value (₹)']
+            st.dataframe(df_monthly, use_container_width=True, hide_index=True)
+
+        # --- Download ---
+        csv_data = pd.DataFrame(monthly).to_csv(index=False)
+        st.download_button(
+            "📥 Download SIP Breakdown CSV",
+            csv_data,
+            f"sip_simulation_{datetime.now().strftime('%Y%m%d')}.csv",
+            "text/csv",
+        )
+
+        # Clear button
+        if st.button("🗑️ Clear & Simulate Another"):
+            for key in ['sip_sim_result', 'sip_sim_nifty', 'sip_sim_fund_name', 'sip_sim_amount']:
+                st.session_state.pop(key, None)
+            st.rerun()
+
+    elif not sip_fund_code:
+        st.info("Search for a fund above, set your SIP amount and date range, then hit **Simulate SIP** to see what your investment would have grown to.")
 
 
 # ===================== PORTFOLIO REVIEW TAB =====================

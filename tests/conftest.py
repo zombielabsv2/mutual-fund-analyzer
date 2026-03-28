@@ -45,7 +45,7 @@ def _make_streamlit_mock():
         "subheader", "header", "title", "divider", "plotly_chart", "dataframe",
         "data_editor", "metric", "progress", "spinner", "text_input", "button",
         "selectbox", "multiselect", "radio", "file_uploader", "download_button",
-        "popover", "expander", "container", "empty",
+        "popover", "expander", "container", "empty", "number_input",
     ]:
         setattr(mock_st, attr, MagicMock())
 
