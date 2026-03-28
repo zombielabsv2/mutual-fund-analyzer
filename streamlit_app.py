@@ -112,6 +112,133 @@ def calculate_rolling_returns(nav_data, years=5):
     return rolling_returns
 
 
+def xirr(cashflows):
+    """Calculate XIRR (annualized internal rate of return) using Newton-Raphson.
+
+    Args:
+        cashflows: list of (datetime, amount) tuples. Negative = outflow, positive = inflow.
+
+    Returns:
+        Annualized return as a decimal (e.g., 0.15 for 15%), or None if solver fails.
+    """
+    if not cashflows or len(cashflows) < 2:
+        return None
+    # Sort by date
+    cashflows = sorted(cashflows, key=lambda x: x[0])
+    t0 = cashflows[0][0]
+
+    def npv(rate):
+        return sum(cf / ((1 + rate) ** ((dt - t0).days / 365.25)) for dt, cf in cashflows)
+
+    def dnpv(rate):
+        return sum(-cf * ((dt - t0).days / 365.25) / ((1 + rate) ** ((dt - t0).days / 365.25 + 1))
+                    for dt, cf in cashflows)
+
+    # Newton-Raphson with initial guess of 10%
+    rate = 0.1
+    for _ in range(100):
+        val = npv(rate)
+        deriv = dnpv(rate)
+        if abs(deriv) < 1e-12:
+            break
+        new_rate = rate - val / deriv
+        # Clamp to avoid divergence
+        new_rate = max(-0.99, min(new_rate, 10.0))
+        if abs(new_rate - rate) < 1e-8:
+            rate = new_rate
+            break
+        rate = new_rate
+    else:
+        return None
+    # Validate: NPV should be near zero
+    if abs(npv(rate)) > 1.0:
+        return None
+    return rate
+
+
+def calculate_sip_rolling_returns(nav_data, years=5, monthly_amount=10000):
+    """Calculate rolling SIP returns (XIRR) from NAV data.
+
+    For each possible end date with sufficient history, simulates a monthly SIP
+    of `monthly_amount` over `years` and calculates the XIRR.
+
+    Returns:
+        List of {'date': 'YYYY-MM-DD', 'return': percentage} dicts.
+    """
+    if not nav_data:
+        return []
+
+    # Parse and sort
+    parsed = []
+    for item in nav_data:
+        try:
+            dt = datetime.strptime(item['date'], '%d-%m-%Y')
+            nav = float(item['nav'])
+            if nav > 0:
+                parsed.append((dt, nav))
+        except (ValueError, KeyError):
+            continue
+    parsed.sort(key=lambda x: x[0])
+    if len(parsed) < 2:
+        return []
+
+    nav_lookup = {d: n for d, n in parsed}
+    target_days = years * 365
+
+    # Build monthly SIP dates: for each end_date, find the start ~years ago
+    # and simulate investing on the 1st of each month
+    results = []
+    # Sample every 5th data point to keep computation reasonable
+    step = max(1, len(parsed) // 500)
+    for idx in range(0, len(parsed), step):
+        end_date, end_nav = parsed[idx]
+        start_date = end_date - timedelta(days=target_days)
+
+        # Need data going back `years`
+        if start_date < parsed[0][0]:
+            continue
+
+        # Simulate monthly SIP
+        cashflows = []
+        current = datetime(start_date.year, start_date.month, 1)
+        total_units = 0.0
+
+        while current <= end_date:
+            # Find nearest trading day NAV
+            best_nav = None
+            for delta in range(0, 8):
+                check = current + timedelta(days=delta)
+                if check in nav_lookup:
+                    best_nav = nav_lookup[check]
+                    break
+            if best_nav:
+                units = monthly_amount / best_nav
+                total_units += units
+                cashflows.append((current, -monthly_amount))
+
+            # Next month
+            if current.month == 12:
+                current = datetime(current.year + 1, 1, 1)
+            else:
+                current = datetime(current.year, current.month + 1, 1)
+
+        if not cashflows or total_units == 0:
+            continue
+
+        # Final redemption value
+        final_value = total_units * end_nav
+        cashflows.append((end_date, final_value))
+
+        rate = xirr(cashflows)
+        if rate is not None and -1 < rate < 5:
+            results.append({
+                'date': end_date.strftime('%Y-%m-%d'),
+                'return': round(rate * 100, 2),
+            })
+
+    return results
+
+
 def calculate_trailing_returns(nav_data):
     """Calculate 1Y, 3Y, 5Y point-to-point CAGR from NAV data."""
     if not nav_data:
@@ -739,27 +866,54 @@ with tab_analyzer:
                     st.rerun()
 
         # --- Rolling Returns Chart ---
-        st.subheader("5-Year Rolling Returns Chart")
+        col_title, col_mode, col_bench = st.columns([3, 2, 5])
+        with col_title:
+            st.subheader("Rolling Returns Chart")
+        with col_mode:
+            return_mode = st.radio("Mode", ["Lumpsum", "SIP (₹10K/mo)"], horizontal=True, key="return_mode")
 
-        # Benchmark overlay
         BENCHMARKS = {
             'Nifty 50': '120716',
             'Nifty Midcap 150': '147622',
             'Nifty 500': '120826',
         }
-        selected_benchmarks = st.multiselect(
-            "Overlay benchmarks",
-            list(BENCHMARKS.keys()),
-            default=[],
-            key="benchmark_overlay",
-        )
+        with col_bench:
+            selected_benchmarks = st.multiselect(
+                "Overlay benchmarks",
+                list(BENCHMARKS.keys()),
+                default=[],
+                key="benchmark_overlay",
+            )
+
+        is_sip = return_mode.startswith("SIP")
+
+        # Load SIP data on demand
+        if is_sip and 'sip_data' not in st.session_state.selected_funds[0]:
+            with st.spinner("Computing SIP rolling returns (this may take a moment)..."):
+                for fund in st.session_state.selected_funds:
+                    sip_data = get_fund_rolling_returns(fund['code'], years=5)
+                    if sip_data:
+                        nav_response = requests.get(f"{MFAPI_BASE_URL}/{fund['code']}", timeout=30)
+                        if nav_response.status_code == 200:
+                            nav_raw = nav_response.json().get('data', [])
+                            fund['sip_data'] = calculate_sip_rolling_returns(nav_raw, years=5)
+                        else:
+                            fund['sip_data'] = []
+                    else:
+                        fund['sip_data'] = []
 
         colors = ['#1a237e', '#c62828', '#2e7d32', '#f57c00', '#6a1b9a']
         benchmark_colors = ['#9e9e9e', '#bdbdbd', '#757575']
         fig = go.Figure()
         for i, fund in enumerate(st.session_state.selected_funds):
-            dates = [d['date'] for d in fund['data']]
-            returns = [d['return'] for d in fund['data']]
+            if is_sip:
+                chart_data = fund.get('sip_data', [])
+            else:
+                chart_data = fund['data']
+            if not chart_data:
+                continue
+            dates = [d['date'] for d in chart_data]
+            returns = [d['return'] for d in chart_data]
             label = fund['name'].split(' -')[0].split(' Direct')[0][:30]
             fig.add_trace(go.Scatter(
                 x=dates, y=returns, name=label,
@@ -767,22 +921,24 @@ with tab_analyzer:
                 hovertemplate='%{x}<br>%{y:.2f}%<extra>' + label + '</extra>',
             ))
 
-        # Add benchmark traces
-        for bi, bname in enumerate(selected_benchmarks):
-            bcode = BENCHMARKS[bname]
-            bdata = get_fund_rolling_returns(bcode, years=5)
-            if bdata and bdata.get('rollingReturns'):
-                bdates = [d['date'] for d in bdata['rollingReturns']]
-                breturns = [d['return'] for d in bdata['rollingReturns']]
-                fig.add_trace(go.Scatter(
-                    x=bdates, y=breturns, name=bname,
-                    mode='lines',
-                    line=dict(color=benchmark_colors[bi % len(benchmark_colors)], width=1.5, dash='dash'),
-                    hovertemplate='%{x}<br>%{y:.2f}%<extra>' + bname + '</extra>',
-                ))
+        # Add benchmark traces (lumpsum only — SIP benchmark requires separate calc)
+        if not is_sip:
+            for bi, bname in enumerate(selected_benchmarks):
+                bcode = BENCHMARKS[bname]
+                bdata = get_fund_rolling_returns(bcode, years=5)
+                if bdata and bdata.get('rollingReturns'):
+                    bdates = [d['date'] for d in bdata['rollingReturns']]
+                    breturns = [d['return'] for d in bdata['rollingReturns']]
+                    fig.add_trace(go.Scatter(
+                        x=bdates, y=breturns, name=bname,
+                        mode='lines',
+                        line=dict(color=benchmark_colors[bi % len(benchmark_colors)], width=1.5, dash='dash'),
+                        hovertemplate='%{x}<br>%{y:.2f}%<extra>' + bname + '</extra>',
+                    ))
 
+        mode_label = "SIP XIRR" if is_sip else "CAGR"
         fig.update_layout(
-            yaxis_title='CAGR (%)',
+            yaxis_title=f'{mode_label} (%)',
             xaxis_title='Date',
             hovermode='x unified',
             legend=dict(orientation='h', y=-0.15),
@@ -790,6 +946,8 @@ with tab_analyzer:
             height=450,
         )
         st.plotly_chart(fig, use_container_width=True)
+        if is_sip:
+            st.caption("SIP returns show the XIRR (annualized return) of a ₹10,000/month SIP over each rolling 5-year window.")
 
         # --- Trailing Returns ---
         st.subheader("Trailing Returns (Point-to-Point)")
@@ -1170,6 +1328,23 @@ with tab_portfolio:
                         rationale.append(f"Top-ranked fund in {cat} category with robustness score of {top_fund['robustnessScore']}")
                     for point in rationale:
                         st.markdown(f"- {point}")
+
+                    # Tax impact estimate
+                    if fund.get('amount') and fund.get('current') and fund['current'] > fund['amount']:
+                        gains = fund['current'] - fund['amount']
+                        # LTCG: 12.5% on gains above Rs 1.25L (assuming >1 year holding)
+                        taxable_gains = max(0, gains - 125000)
+                        ltcg_tax = round(taxable_gains * 0.125)
+                        net_after_tax = round(fund['current'] - ltcg_tax)
+                        st.markdown("---")
+                        st.markdown("**Tax impact of switching** (assuming >1 year holding)")
+                        tc1, tc2, tc3, tc4 = st.columns(4)
+                        tc1.metric("Gains", f"₹{gains:,.0f}")
+                        tc2.metric("LTCG Tax (12.5%)", f"₹{ltcg_tax:,.0f}")
+                        tc3.metric("Net After Tax", f"₹{net_after_tax:,.0f}")
+                        tc4.metric("Tax as % of Value", f"{ltcg_tax / fund['current'] * 100:.1f}%")
+                        if ltcg_tax > 0:
+                            st.caption(f"LTCG of 12.5% applies on gains above ₹1.25L. First ₹1.25L of gains is tax-free. STCG (<1 year) is 20%.")
 
                     # Alternatives
                     alts = [f for f in cat_funds[1:4] if f['schemeCode'] != fund['schemeCode']]
