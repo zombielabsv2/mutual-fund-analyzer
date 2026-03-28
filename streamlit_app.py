@@ -343,7 +343,7 @@ def load_all_rankings(years=5):
 
 
 @st.cache_data(ttl=3600)
-def analyze_portfolio_fund(scheme_code):
+def analyze_portfolio_fund(scheme_code, years=5):
     """Fetch and fully analyze a single fund for portfolio review."""
     try:
         response = requests.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=30)
@@ -354,7 +354,7 @@ def analyze_portfolio_fund(scheme_code):
         meta = data.get('meta', {})
         if not nav_data or not meta:
             return None
-        rolling = calculate_rolling_returns(nav_data, years=5)
+        rolling = calculate_rolling_returns(nav_data, years=years)
         if not rolling or len(rolling) < 10:
             return None
         returns_values = [r['return'] for r in rolling]
@@ -792,11 +792,15 @@ with tab_portfolio:
     st.subheader("Portfolio Review & Swap Recommendations")
     st.caption("Upload your mutual fund statement (PDF, CSV, or Excel) from Groww, Kuvera, MFCentral, or any broker. We'll auto-identify your funds and recommend more robust alternatives in each category.")
 
-    uploaded = st.file_uploader(
-        "Upload your holdings statement",
-        type=["pdf", "csv", "xlsx", "xls"],
-        help="Supported: PDF/CSV/Excel from Groww, Kuvera, MFCentral, CAMS, Karvy, or any broker.",
-    )
+    col_upload, col_period = st.columns([6, 2])
+    with col_period:
+        portfolio_years = st.selectbox("Rolling Period", [3, 5, 10], index=1, key="portfolio_rolling_years", format_func=lambda x: f"{x}-Year Rolling")
+    with col_upload:
+        uploaded = st.file_uploader(
+            "Upload your holdings statement",
+            type=["pdf", "csv", "xlsx", "xls"],
+            help="Supported: PDF/CSV/Excel from Groww, Kuvera, MFCentral, CAMS, Karvy, or any broker.",
+        )
 
     if uploaded:
         # Detect new file — clear old results automatically
@@ -827,7 +831,7 @@ with tab_portfolio:
                         scheme, confidence = match_fund_to_scheme(h['name'], all_schemes)
                         if scheme:
                             code = str(scheme['schemeCode'])
-                            data = analyze_portfolio_fund(code)
+                            data = analyze_portfolio_fund(code, years=portfolio_years)
                             if data:
                                 data['amount'] = h.get('invested')
                                 data['current'] = h.get('current')
@@ -887,7 +891,7 @@ with tab_portfolio:
         st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
 
         # Load rankings for comparison — index by both broad and fine category
-        rankings = load_all_rankings()
+        rankings = load_all_rankings(years=portfolio_years)
         rankings_by_cat = {}
         rankings_by_fine = {}
         for f in rankings:
@@ -988,13 +992,13 @@ with tab_portfolio:
                         if rob_pct > 0:
                             rationale.append(f"**{rob_pct}% higher robustness score** ({top_fund['robustnessScore']} vs {fund['robustnessScore']}) — more reliable wealth creation")
                     if top_fund['avgReturn'] > fund['avgReturn']:
-                        rationale.append(f"**{ret_delta:+.1f}% higher average return** over rolling 5-year periods")
+                        rationale.append(f"**{ret_delta:+.1f}% higher average return** over rolling {portfolio_years}-year periods")
                     if top_fund['minReturn'] > fund['minReturn']:
-                        rationale.append(f"**Better downside protection** — worst 5-year return: {top_fund['minReturn']}% vs {fund['minReturn']}%")
+                        rationale.append(f"**Better downside protection** — worst {portfolio_years}-year return: {top_fund['minReturn']}% vs {fund['minReturn']}%")
                     if top_fund['stdDev'] < fund['stdDev']:
                         rationale.append(f"**More consistent** — standard deviation of {top_fund['stdDev']} vs {fund['stdDev']}")
                     if top_fund['positivePercentage'] > fund['positivePercentage']:
-                        rationale.append(f"**Positive in {top_fund['positivePercentage']}%** of 5-year periods vs {fund['positivePercentage']}%")
+                        rationale.append(f"**Positive in {top_fund['positivePercentage']}%** of {portfolio_years}-year periods vs {fund['positivePercentage']}%")
                     if not rationale:
                         rationale.append(f"Top-ranked fund in {cat} category with robustness score of {top_fund['robustnessScore']}")
                     for point in rationale:
