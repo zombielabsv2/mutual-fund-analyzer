@@ -572,6 +572,78 @@ def match_fund_to_scheme(fund_name, all_schemes):
     return (best_match, round(best_score * 100)) if best_score >= 0.35 else (None, 0)
 
 
+# --- Score Breakdown ---
+
+def render_score_breakdown(fund, years=5):
+    """Render a detailed, transparent robustness score breakdown for a fund."""
+    name = fund['schemeName'].split(' -')[0].split(' Direct')[0]
+    avg = fund['avgReturn']
+    pos_pct = fund['positivePercentage']
+    std = fund['stdDev']
+    total = fund['totalPeriods']
+    conf = fund.get('confidence', 100)
+
+    raw_score = (avg * (pos_pct / 100)) / (1 + std / 10)
+    final_score = raw_score * (conf / 100)
+
+    st.markdown("---")
+    st.markdown(f"#### Score Breakdown: {name}")
+
+    col_formula, col_chart = st.columns([2, 3])
+
+    with col_formula:
+        st.markdown(f"**Raw Metrics** — {total:,} rolling {years}-year windows")
+        st.markdown(
+            f"| Metric | Value |\n|---|---|\n"
+            f"| Average Return | {avg}% |\n"
+            f"| Min Return | {fund['minReturn']}% |\n"
+            f"| Max Return | {fund['maxReturn']}% |\n"
+            f"| Std Deviation | {std} |\n"
+            f"| Positive Periods | {pos_pct}% |"
+        )
+        st.markdown("**Robustness Score Calculation**")
+        st.code(
+            f"Raw Score  = (Avg × Positive%) / (1 + StdDev/10)\n"
+            f"           = ({avg} × {pos_pct / 100:.3f}) / (1 + {std}/10)\n"
+            f"           = {avg * pos_pct / 100:.2f} / {1 + std / 10:.3f}\n"
+            f"           = {raw_score:.2f}\n"
+            f"\n"
+            f"Confidence = min(1, {total:,} / 1,500) = {conf}%\n"
+            f"\n"
+            f"Final Score = {raw_score:.2f} × {conf / 100:.2f} = {final_score:.2f}",
+            language=None,
+        )
+
+    with col_chart:
+        data = get_fund_rolling_returns(fund['schemeCode'], years=years)
+        if data and data.get('rollingReturns'):
+            returns_data = data['rollingReturns']
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=[d['date'] for d in returns_data],
+                y=[d['return'] for d in returns_data],
+                mode='lines',
+                line=dict(color='#1a237e', width=1.5),
+                fill='tozeroy',
+                fillcolor='rgba(26,35,126,0.1)',
+                hovertemplate='%{x}<br>%{y:.2f}%<extra></extra>',
+            ))
+            fig.add_hline(y=avg, line_dash="dash", line_color="#c62828",
+                          annotation_text=f"Avg: {avg}%")
+            fig.add_hline(y=0, line_color="gray", line_width=0.5)
+            fig.update_layout(
+                title=f"{years}-Year Rolling Returns",
+                yaxis_title='CAGR (%)',
+                height=350,
+                margin=dict(t=40, b=20, l=40, r=20),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                f"Each point = the {years}-year CAGR ending on that date. "
+                f"The spread drives the avg, std dev, and positive % above."
+            )
+
+
 # --- Session State ---
 if 'selected_funds' not in st.session_state:
     st.session_state.selected_funds = []
@@ -758,10 +830,13 @@ with tab_rankings:
         display_df.columns = ['#', 'Fund Name', 'Fund House', 'Category', 'Avg Return %',
                               'Min %', 'Max %', 'Std Dev', 'Positive %', 'Data Pts', 'Confidence %', 'Robustness']
 
-        st.dataframe(
+        st.caption("Click any row to see how its robustness score is calculated.")
+        ranking_event = st.dataframe(
             display_df,
             use_container_width=True,
             hide_index=True,
+            selection_mode="single-row",
+            on_select="rerun",
             column_config={
                 '#': st.column_config.NumberColumn(width="small"),
                 'Avg Return %': st.column_config.NumberColumn(format="%.1f"),
@@ -774,6 +849,9 @@ with tab_rankings:
                 'Robustness': st.column_config.NumberColumn(format="%.1f"),
             },
         )
+
+        if ranking_event.selection.rows:
+            render_score_breakdown(filtered[ranking_event.selection.rows[0]], years=rolling_years)
 
         # --- Download ---
         csv_data = display_df.to_csv(index=False)
@@ -888,7 +966,11 @@ with tab_portfolio:
             if f.get('match_confidence'):
                 row['Match %'] = f"{f['match_confidence']}%"
             port_rows.append(row)
-        st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
+        st.caption("Click any row to see how its robustness score is calculated.")
+        portfolio_event = st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True, selection_mode="single-row", on_select="rerun")
+
+        if portfolio_event.selection.rows:
+            render_score_breakdown(portfolio[portfolio_event.selection.rows[0]], years=portfolio_years)
 
         # Load rankings for comparison — index by both broad and fine category
         rankings = load_all_rankings(years=portfolio_years)
@@ -967,6 +1049,9 @@ with tab_portfolio:
                         st.metric("Std Dev", f"{fund['stdDev']}")
                         st.metric("Positive Periods", f"{fund['positivePercentage']}%")
                         st.metric("Robustness Score", f"{fund['robustnessScore']}")
+                        _raw = (fund['avgReturn'] * fund['positivePercentage'] / 100) / (1 + fund['stdDev'] / 10)
+                        _conf = fund.get('confidence', 100)
+                        st.caption(f"= ({fund['avgReturn']} × {fund['positivePercentage']/100:.2f}) / (1+{fund['stdDev']}/10) × {_conf}% conf")
 
                     with col2:
                         st.markdown(f"##### Recommended (#{1} in {fine_cat})")
@@ -982,6 +1067,9 @@ with tab_portfolio:
                         st.metric("Positive Periods", f"{top_fund['positivePercentage']}%", delta=f"{pos_delta:+.1f}%")
                         rob_delta = round(top_fund['robustnessScore'] - fund['robustnessScore'], 1)
                         st.metric("Robustness Score", f"{top_fund['robustnessScore']}", delta=f"{rob_delta:+.1f}")
+                        _raw_t = (top_fund['avgReturn'] * top_fund['positivePercentage'] / 100) / (1 + top_fund['stdDev'] / 10)
+                        _conf_t = top_fund.get('confidence', 100)
+                        st.caption(f"= ({top_fund['avgReturn']} × {top_fund['positivePercentage']/100:.2f}) / (1+{top_fund['stdDev']}/10) × {_conf_t}% conf")
 
                     # Rationale
                     st.markdown("---")
