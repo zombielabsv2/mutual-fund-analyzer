@@ -23,6 +23,8 @@ st.set_page_config(
 )
 
 MFAPI_BASE_URL = "https://api.mfapi.in/mf"
+_http_session = requests.Session()
+_http_session.headers.update({"User-Agent": "FundScope/1.0 (Streamlit App)", "Accept": "application/json"})
 
 # --- Fund Universe (verified Direct Growth equity scheme codes) ---
 RANKING_FUND_CODES = [
@@ -524,7 +526,7 @@ def get_fine_category(fund_name, scheme_category=''):
 def search_funds_api(query):
     """Search mutual funds using mfapi.in search endpoint."""
     try:
-        response = requests.get(f"{MFAPI_BASE_URL}/search?q={query}", timeout=15)
+        response = _http_session.get(f"{MFAPI_BASE_URL}/search?q={query}", timeout=15)
         response.raise_for_status()
         data = response.json()
         return [{'schemeCode': str(f.get('schemeCode', '')), 'schemeName': f.get('schemeName', '')}
@@ -537,7 +539,7 @@ def search_funds_api(query):
 def get_fund_rolling_returns(scheme_code, years=5):
     """Fetch NAV data and compute rolling returns for one fund."""
     try:
-        response = requests.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=30)
+        response = _http_session.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=30)
         response.raise_for_status()
         data = response.json()
         nav_data = data.get('data', [])
@@ -574,7 +576,7 @@ def load_all_rankings(years=5):
     """Fetch and rank all funds in the universe for a given rolling period."""
     def process_fund(scheme_code):
         try:
-            response = requests.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=20)
+            response = _http_session.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=20)
             if response.status_code != 200:
                 return None
             data = response.json()
@@ -635,7 +637,7 @@ def load_all_rankings(years=5):
 def analyze_portfolio_fund(scheme_code, years=5):
     """Fetch and fully analyze a single fund for portfolio review."""
     try:
-        response = requests.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=30)
+        response = _http_session.get(f"{MFAPI_BASE_URL}/{scheme_code}", timeout=30)
         if response.status_code != 200:
             return None
         data = response.json()
@@ -804,7 +806,7 @@ def consolidate_holdings(holdings):
 @st.cache_data(ttl=3600)
 def _fetch_all_schemes():
     """Fetch all schemes — raises on failure so st.cache_data won't cache errors."""
-    response = requests.get(MFAPI_BASE_URL, timeout=30)
+    response = _http_session.get(MFAPI_BASE_URL, timeout=30)
     response.raise_for_status()
     data = response.json()
     if not data:
@@ -814,10 +816,14 @@ def _fetch_all_schemes():
 
 def get_all_schemes():
     """Fetch all mutual fund schemes. Returns [] on failure without caching the failure."""
-    try:
-        return _fetch_all_schemes()
-    except Exception:
-        return []
+    for attempt in range(2):
+        try:
+            return _fetch_all_schemes()
+        except Exception:
+            if attempt == 0:
+                import time
+                time.sleep(2)
+    return []
 
 
 def match_fund_to_scheme(fund_name, all_schemes):
@@ -1024,7 +1030,7 @@ with tab_analyzer:
                 for fund in st.session_state.selected_funds:
                     sip_data = get_fund_rolling_returns(fund['code'], years=5)
                     if sip_data:
-                        nav_response = requests.get(f"{MFAPI_BASE_URL}/{fund['code']}", timeout=30)
+                        nav_response = _http_session.get(f"{MFAPI_BASE_URL}/{fund['code']}", timeout=30)
                         if nav_response.status_code == 200:
                             nav_raw = nav_response.json().get('data', [])
                             fund['sip_data'] = calculate_sip_rolling_returns(nav_raw, years=5)
@@ -1279,7 +1285,7 @@ with tab_sip_sim:
         if st.button("🚀 Simulate SIP", type="primary"):
             with st.spinner(f"Simulating ₹{sip_amount:,}/month SIP from {sip_start_year} to {sip_end_year}..."):
                 try:
-                    response = requests.get(f"{MFAPI_BASE_URL}/{sip_fund_code}", timeout=30)
+                    response = _http_session.get(f"{MFAPI_BASE_URL}/{sip_fund_code}", timeout=30)
                     response.raise_for_status()
                     data = response.json()
                     nav_data = data.get('data', [])
@@ -1290,7 +1296,7 @@ with tab_sip_sim:
                     result = simulate_historical_sip(nav_data, sip_amount, start_dt, end_dt)
 
                     # Also simulate Nifty 50 for comparison
-                    nifty_response = requests.get(f"{MFAPI_BASE_URL}/120716", timeout=30)
+                    nifty_response = _http_session.get(f"{MFAPI_BASE_URL}/120716", timeout=30)
                     nifty_result = None
                     if nifty_response.status_code == 200:
                         nifty_nav = nifty_response.json().get('data', [])
@@ -1450,37 +1456,44 @@ with tab_portfolio:
 
                 if st.button("🔍 Analyze Portfolio & Get Recommendations", type="primary"):
                     all_schemes = get_all_schemes()
-                    portfolio_results = []
-                    unmatched_funds = []
-                    progress = st.progress(0, text="Matching and analyzing your funds...")
+                    if not all_schemes:
+                        st.error("Could not fetch the mutual fund scheme list from mfapi.in. The API may be temporarily down — please try again in a minute.")
+                    else:
+                        portfolio_results = []
+                        unmatched_funds = []
+                        progress = st.progress(0, text="Matching and analyzing your funds...")
 
-                    for i, h in enumerate(holdings):
-                        scheme, confidence = match_fund_to_scheme(h['name'], all_schemes)
-                        if scheme:
-                            code = str(scheme['schemeCode'])
-                            data = analyze_portfolio_fund(code, years=portfolio_years)
-                            if data:
-                                data['amount'] = h.get('invested')
-                                data['current'] = h.get('current')
-                                data['original_name'] = h['name']
-                                data['match_confidence'] = confidence
-                                data['original_category'] = h.get('category', '')
-                                data['original_subcategory'] = h.get('subcategory', '')
-                                portfolio_results.append(data)
+                        for i, h in enumerate(holdings):
+                            scheme, confidence = match_fund_to_scheme(h['name'], all_schemes)
+                            if scheme:
+                                code = str(scheme['schemeCode'])
+                                data = analyze_portfolio_fund(code, years=portfolio_years)
+                                # Retry with 3-year if 5-year has insufficient history
+                                if not data and portfolio_years == 5:
+                                    data = analyze_portfolio_fund(code, years=3)
+                                if data:
+                                    data['amount'] = h.get('invested')
+                                    data['current'] = h.get('current')
+                                    data['original_name'] = h['name']
+                                    data['match_confidence'] = confidence
+                                    data['original_category'] = h.get('category', '')
+                                    data['original_subcategory'] = h.get('subcategory', '')
+                                    portfolio_results.append(data)
+                                else:
+                                    unmatched_funds.append(h['name'])
                             else:
                                 unmatched_funds.append(h['name'])
-                        else:
-                            unmatched_funds.append(h['name'])
-                        progress.progress((i + 1) / len(holdings), text=f"Analyzing fund {i + 1}/{len(holdings)}...")
+                            progress.progress((i + 1) / len(holdings), text=f"Analyzing fund {i + 1}/{len(holdings)} — {len(portfolio_results)} matched so far...")
+                            if i < len(holdings) - 1:
+                                time.sleep(0.3)
 
-                    progress.empty()
-                    st.session_state.portfolio_funds = portfolio_results
-                    st.session_state.portfolio_unmatched = unmatched_funds
-                    st.rerun()
+                        progress.empty()
+                        st.session_state.portfolio_funds = portfolio_results
+                        st.session_state.portfolio_unmatched = unmatched_funds
+                        st.rerun()
 
     # --- Portfolio Analysis & Recommendations ---
-    if st.session_state.portfolio_funds:
-        portfolio = st.session_state.portfolio_funds
+    if st.session_state.portfolio_funds or st.session_state.portfolio_unmatched:
 
         # Clear button
         if st.button("🗑️ Clear & Upload New Statement"):
@@ -1491,9 +1504,16 @@ with tab_portfolio:
 
         # Show unmatched funds
         if st.session_state.portfolio_unmatched:
-            with st.expander(f"⚠️ {len(st.session_state.portfolio_unmatched)} funds could not be matched (insufficient history or not found)"):
+            with st.expander(f"⚠️ {len(st.session_state.portfolio_unmatched)} funds could not be matched (insufficient history or not found)", expanded=not st.session_state.portfolio_funds):
                 for name in st.session_state.portfolio_unmatched:
                     st.markdown(f"- {name}")
+
+        portfolio = st.session_state.portfolio_funds
+        if not portfolio:
+            st.warning("None of the funds in your statement could be analyzed. This usually means the funds have limited NAV history or could not be matched to the scheme database. Try a 3-Year rolling period instead.")
+
+    if st.session_state.portfolio_funds:
+        portfolio = st.session_state.portfolio_funds
 
         # Portfolio summary table
         st.markdown("### Your Portfolio")
