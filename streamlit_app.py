@@ -112,6 +112,39 @@ def calculate_rolling_returns(nav_data, years=5):
     return rolling_returns
 
 
+def calculate_trailing_returns(nav_data):
+    """Calculate 1Y, 3Y, 5Y point-to-point CAGR from NAV data."""
+    if not nav_data:
+        return {}
+    parsed = []
+    for item in nav_data:
+        try:
+            dt = datetime.strptime(item['date'], '%d-%m-%Y')
+            nav = float(item['nav'])
+            if nav > 0:
+                parsed.append((dt, nav))
+        except (KeyError, ValueError):
+            continue
+    if len(parsed) < 2:
+        return {}
+    parsed.sort(key=lambda x: x[0])
+    latest_date, latest_nav = parsed[-1]
+    results = {}
+    for label, years in [('1Y', 1), ('3Y', 3), ('5Y', 5), ('10Y', 10)]:
+        target = latest_date - timedelta(days=int(years * 365.25))
+        best = None
+        for dt, nav in parsed:
+            if abs((dt - target).days) <= 15:
+                if best is None or abs((dt - target).days) < abs((best[0] - target).days):
+                    best = (dt, nav)
+        if best:
+            actual_years = (latest_date - best[0]).days / 365.25
+            if actual_years >= years - 0.1:
+                cagr = ((latest_nav / best[1]) ** (1 / actual_years) - 1) * 100
+                results[label] = round(cagr, 2)
+    return results
+
+
 def normalize_category(scheme_category):
     """Map API scheme_category to a clean display category."""
     if not scheme_category:
@@ -275,10 +308,12 @@ def get_fund_rolling_returns(scheme_code, years=5):
             ),
             'totalPeriods': len(returns_values),
         }
+        trailing = calculate_trailing_returns(nav_data)
         return {
             'meta': meta,
             'rollingReturns': rolling,
             'statistics': stats,
+            'trailingReturns': trailing,
         }
     except Exception:
         return None
@@ -310,6 +345,7 @@ def load_all_rankings(years=5):
             # Confidence discount: softer sqrt curve so newer funds aren't over-penalized
             confidence = min(1.0, math.sqrt(len(returns_values) / 1500))
             robustness = raw_robustness * confidence
+            trailing = calculate_trailing_returns(nav_data)
             scheme_name = meta.get('scheme_name', 'Unknown')
             scheme_cat = meta.get('scheme_category', '')
             return {
@@ -318,6 +354,9 @@ def load_all_rankings(years=5):
                 'category': normalize_category(scheme_cat),
                 'fineCategory': get_fine_category(scheme_name, scheme_cat),
                 'fundHouse': meta.get('fund_house', 'Unknown'),
+                'trailing1Y': trailing.get('1Y'),
+                'trailing3Y': trailing.get('3Y'),
+                'trailing5Y': trailing.get('5Y'),
                 'avgReturn': round(avg, 2),
                 'minReturn': round(mn, 2),
                 'maxReturn': round(mx, 2),
@@ -682,6 +721,7 @@ with tab_analyzer:
                             'name': name,
                             'data': data['rollingReturns'],
                             'stats': data['statistics'],
+                            'trailing': data.get('trailingReturns', {}),
                         })
                         st.rerun()
                     else:
@@ -700,7 +740,22 @@ with tab_analyzer:
 
         # --- Rolling Returns Chart ---
         st.subheader("5-Year Rolling Returns Chart")
+
+        # Benchmark overlay
+        BENCHMARKS = {
+            'Nifty 50': '120716',
+            'Nifty Midcap 150': '147622',
+            'Nifty 500': '120826',
+        }
+        selected_benchmarks = st.multiselect(
+            "Overlay benchmarks",
+            list(BENCHMARKS.keys()),
+            default=[],
+            key="benchmark_overlay",
+        )
+
         colors = ['#1a237e', '#c62828', '#2e7d32', '#f57c00', '#6a1b9a']
+        benchmark_colors = ['#9e9e9e', '#bdbdbd', '#757575']
         fig = go.Figure()
         for i, fund in enumerate(st.session_state.selected_funds):
             dates = [d['date'] for d in fund['data']]
@@ -711,6 +766,21 @@ with tab_analyzer:
                 mode='lines', line=dict(color=colors[i % len(colors)], width=2),
                 hovertemplate='%{x}<br>%{y:.2f}%<extra>' + label + '</extra>',
             ))
+
+        # Add benchmark traces
+        for bi, bname in enumerate(selected_benchmarks):
+            bcode = BENCHMARKS[bname]
+            bdata = get_fund_rolling_returns(bcode, years=5)
+            if bdata and bdata.get('rollingReturns'):
+                bdates = [d['date'] for d in bdata['rollingReturns']]
+                breturns = [d['return'] for d in bdata['rollingReturns']]
+                fig.add_trace(go.Scatter(
+                    x=bdates, y=breturns, name=bname,
+                    mode='lines',
+                    line=dict(color=benchmark_colors[bi % len(benchmark_colors)], width=1.5, dash='dash'),
+                    hovertemplate='%{x}<br>%{y:.2f}%<extra>' + bname + '</extra>',
+                ))
+
         fig.update_layout(
             yaxis_title='CAGR (%)',
             xaxis_title='Date',
@@ -721,8 +791,22 @@ with tab_analyzer:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- Statistics Table ---
-        st.subheader("Statistics Summary")
+        # --- Trailing Returns ---
+        st.subheader("Trailing Returns (Point-to-Point)")
+        trailing_rows = []
+        for fund in st.session_state.selected_funds:
+            t = fund.get('trailing', {})
+            trailing_rows.append({
+                'Fund Name': fund['name'].split(' -')[0].split(' Direct')[0],
+                '1Y (%)': t.get('1Y', '—'),
+                '3Y (%)': t.get('3Y', '—'),
+                '5Y (%)': t.get('5Y', '—'),
+                '10Y (%)': t.get('10Y', '—'),
+            })
+        st.dataframe(pd.DataFrame(trailing_rows), use_container_width=True, hide_index=True)
+
+        # --- Rolling Return Statistics ---
+        st.subheader("Rolling Return Statistics")
         stats_rows = []
         for fund in st.session_state.selected_funds:
             s = fund['stats']
@@ -805,22 +889,23 @@ with tab_rankings:
         c4.metric("Most Consistent", most_consistent['schemeName'].split(' -')[0].split(' Direct')[0][:22])
 
         # --- Rankings Table (clickable fund names) ---
-        hcols = st.columns([0.5, 3, 2, 1.5, 1, 1, 1, 1, 1])
-        for col, label in zip(hcols, ['#', 'Fund Name', 'Fund House', 'Category', 'Avg %', 'Min %', 'Std Dev', 'Data Pts', 'Score']):
+        hcols = st.columns([0.5, 3, 1.5, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 1])
+        for col, label in zip(hcols, ['#', 'Fund Name', 'Category', '1Y %', '3Y %', '5Y %', 'Rolling Avg %', 'Std Dev', 'Data Pts', 'Score']):
             col.markdown(f"**{label}**")
 
         for rank, fund in enumerate(filtered, 1):
-            cols = st.columns([0.5, 3, 2, 1.5, 1, 1, 1, 1, 1])
+            cols = st.columns([0.5, 3, 1.5, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 1])
             cols[0].write(rank)
             with cols[1]:
                 fund_link(fund, years=rolling_years, key_prefix=f"rk_{fund['schemeCode']}")
-            cols[2].write(fund.get('fundHouse', '').split(' Mutual')[0])
-            cols[3].write(fund['category'])
-            cols[4].write(f"{fund['avgReturn']}%")
-            cols[5].write(f"{fund['minReturn']}%")
-            cols[6].write(f"{fund['stdDev']}")
-            cols[7].write(f"{fund['totalPeriods']:,}")
-            cols[8].write(f"**{fund['robustnessScore']}**")
+            cols[2].write(fund['category'])
+            cols[3].write(f"{fund['trailing1Y']}%" if fund.get('trailing1Y') is not None else "—")
+            cols[4].write(f"{fund['trailing3Y']}%" if fund.get('trailing3Y') is not None else "—")
+            cols[5].write(f"{fund['trailing5Y']}%" if fund.get('trailing5Y') is not None else "—")
+            cols[6].write(f"{fund['avgReturn']}%")
+            cols[7].write(f"{fund['stdDev']}")
+            cols[8].write(f"{fund['totalPeriods']:,}")
+            cols[9].write(f"**{fund['robustnessScore']}**")
 
         # --- Download ---
         download_df = pd.DataFrame([{
@@ -828,7 +913,10 @@ with tab_rankings:
             'Fund Name': f['schemeName'].split(' -')[0].split(' Direct')[0],
             'Fund House': f.get('fundHouse', '').split(' Mutual')[0],
             'Category': f['category'],
-            'Avg Return %': f['avgReturn'],
+            '1Y Return %': f.get('trailing1Y', ''),
+            '3Y Return %': f.get('trailing3Y', ''),
+            '5Y Return %': f.get('trailing5Y', ''),
+            'Rolling Avg %': f['avgReturn'],
             'Min %': f['minReturn'],
             'Max %': f['maxReturn'],
             'Std Dev': f['stdDev'],
@@ -1034,6 +1122,7 @@ with tab_portfolio:
                 top_name = top_fund['schemeName'].split(' -')[0].split(' Direct')[0]
 
                 with st.expander(f"🔄 **{fund_name}** → **{top_name}**", expanded=True):
+                    st.caption("Data comparison only — not investment advice. Consult a SEBI-registered advisor.")
                     col1, col2 = st.columns(2)
 
                     with col1:
@@ -1047,7 +1136,7 @@ with tab_portfolio:
                         st.metric("Robustness Score", f"{fund['robustnessScore']}")
 
                     with col2:
-                        st.markdown(f"##### Recommended (#{1} in {fine_cat})")
+                        st.markdown(f"##### Higher-ranked alternative (#{1} in {fine_cat})")
                         fund_link(top_fund, years=portfolio_years, key_prefix=f"sw_rec_{top_fund['schemeCode']}")
                         st.caption(f"{top_fund['fundHouse'].split(' Mutual')[0]}")
                         ret_delta = round(top_fund['avgReturn'] - fund['avgReturn'], 1)
@@ -1619,4 +1708,15 @@ Fund categorization uses the **SEBI mutual fund categorization framework** (Octo
 - **Fund manager changes** — Track record may reflect a previous manager's skill.
 - **AUM & liquidity** — Not accounted for; can impact future performance (especially small cap).
 - **Expense ratios** — NAV is net of expenses, so implicitly included. Direct plans have lower costs than Regular.
+- **Tax impact** — Swap comparisons do not account for capital gains tax, exit loads, or stamp duty on switching.
 """)
+
+# --- Disclaimer (all tabs) ---
+st.divider()
+st.caption(
+    "**Disclaimer:** This tool provides data and analytics for informational and educational purposes only. "
+    "It does not constitute investment advice, a recommendation, or an offer to buy or sell any mutual fund. "
+    "Past performance does not guarantee future results. Rankings and comparisons are based on historical data "
+    "and quantitative metrics — they should not be the sole basis for investment decisions. "
+    "Please consult a SEBI-registered investment advisor before making any investment decisions."
+)
