@@ -1,5 +1,5 @@
 """
-Mutual Fund 5-Year Rolling Returns Analyzer — Streamlit Edition
+FundScope — Analyze. Compare. Optimize.
 Analyze, compare, and rank Indian mutual funds by rolling return robustness.
 """
 
@@ -17,7 +17,7 @@ import time
 
 # --- Page Config ---
 st.set_page_config(
-    page_title="MF Rolling Returns Analyzer",
+    page_title="FundScope",
     page_icon="📈",
     layout="wide",
 )
@@ -918,8 +918,8 @@ if 'portfolio_file_id' not in st.session_state:
 
 # --- Header ---
 st.markdown(
-    "<h1 style='text-align:center;'>📈 Mutual Fund 5-Year Rolling Returns Analyzer</h1>"
-    "<p style='text-align:center;color:#666;'>Analyze and compare rolling returns of Indian mutual funds</p>",
+    "<h1 style='text-align:center;'>FundScope</h1>"
+    "<p style='text-align:center;color:#666;'>Analyze. Compare. Optimize.</p>",
     unsafe_allow_html=True,
 )
 
