@@ -785,7 +785,7 @@ with tab_rankings:
     st.caption("Funds ranked by a robustness score that rewards high average returns, consistency, and downside protection.")
 
     if st.button("🔄 Load / Refresh Rankings", type="primary"):
-        st.cache_data.clear()
+        load_all_rankings.clear()
 
     rankings = load_all_rankings(years=rolling_years)
 
