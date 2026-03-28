@@ -813,10 +813,11 @@ def get_all_schemes():
         response.raise_for_status()
         data = response.json()
         if not data:
-            # Don't cache empty — force retry next call
             get_all_schemes.clear()
         return data
     except Exception:
+        # Don't cache failures — clear so next call retries
+        get_all_schemes.clear()
         return []
 
 
