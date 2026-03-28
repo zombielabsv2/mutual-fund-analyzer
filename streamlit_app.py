@@ -520,25 +520,21 @@ def get_fine_category(fund_name, scheme_category=''):
 
 # --- Cached API Functions ---
 
-@st.cache_data(ttl=3600)
 def search_funds_api(query):
-    """Search mutual funds by name or code."""
-    try:
-        response = requests.get(f"{MFAPI_BASE_URL}", timeout=30)
-        response.raise_for_status()
-        all_funds = response.json()
-        q = query.lower()
-        results = []
-        for fund in all_funds:
-            code = str(fund.get('schemeCode', ''))
-            name = fund.get('schemeName', '')
-            if q in name.lower() or q in code:
-                results.append({'schemeCode': code, 'schemeName': name})
-            if len(results) >= 20:
-                break
-        return results
-    except Exception:
+    """Search mutual funds by name or code. Uses cached get_all_schemes()."""
+    all_funds = get_all_schemes()
+    if not all_funds:
         return []
+    q = query.lower()
+    results = []
+    for fund in all_funds:
+        code = str(fund.get('schemeCode', ''))
+        name = fund.get('schemeName', '')
+        if q in name.lower() or q in code:
+            results.append({'schemeCode': code, 'schemeName': name})
+        if len(results) >= 20:
+            break
+    return results
 
 
 @st.cache_data(ttl=3600)
@@ -815,7 +811,11 @@ def get_all_schemes():
     try:
         response = requests.get(MFAPI_BASE_URL, timeout=30)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        if not data:
+            # Don't cache empty — force retry next call
+            get_all_schemes.clear()
+        return data
     except Exception:
         return []
 
