@@ -1171,30 +1171,52 @@ with tab_rankings:
         decent = [f for f in rankings if f['avgReturn'] >= avg_ret]
         most_consistent = min(decent, key=lambda f: f['stdDev']) if decent else rankings[0]
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2 = st.columns(2)
         c1.metric("Funds Analyzed", len(rankings))
         c2.metric("Top Fund", rankings[0]['schemeName'].split(' -')[0].split(' Direct')[0][:22])
+        c3, c4 = st.columns(2)
         c3.metric("Strongest Category", best_cat)
         c4.metric("Most Consistent", most_consistent['schemeName'].split(' -')[0].split(' Direct')[0][:22])
 
-        # --- Rankings Table (clickable fund names) ---
-        hcols = st.columns([0.5, 3, 1.5, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 1])
-        for col, label in zip(hcols, ['#', 'Fund Name', 'Category', '1Y %', '3Y %', '5Y %', 'Rolling Avg %', 'Std Dev', 'Data Pts', 'Score']):
-            col.markdown(f"**{label}**")
+        # --- Rankings Table ---
+        display_df = pd.DataFrame([{
+            '#': i + 1,
+            'Fund Name': f['schemeName'].split(' -')[0].split(' Direct')[0],
+            'Category': f['category'],
+            '1Y %': f.get('trailing1Y', ''),
+            '3Y %': f.get('trailing3Y', ''),
+            '5Y %': f.get('trailing5Y', ''),
+            'Avg %': f['avgReturn'],
+            'Std Dev': f['stdDev'],
+            'Score': f['robustnessScore'],
+        } for i, f in enumerate(filtered)])
 
-        for rank, fund in enumerate(filtered, 1):
-            cols = st.columns([0.5, 3, 1.5, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 1])
-            cols[0].write(rank)
-            with cols[1]:
-                fund_link(fund, years=rolling_years, key_prefix=f"rk_{fund['schemeCode']}")
-            cols[2].write(fund['category'])
-            cols[3].write(f"{fund['trailing1Y']}%" if fund.get('trailing1Y') is not None else "—")
-            cols[4].write(f"{fund['trailing3Y']}%" if fund.get('trailing3Y') is not None else "—")
-            cols[5].write(f"{fund['trailing5Y']}%" if fund.get('trailing5Y') is not None else "—")
-            cols[6].write(f"{fund['avgReturn']}%")
-            cols[7].write(f"{fund['stdDev']}")
-            cols[8].write(f"{fund['totalPeriods']:,}")
-            cols[9].write(f"**{fund['robustnessScore']}**")
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                '#': st.column_config.NumberColumn(width="small"),
+                '1Y %': st.column_config.NumberColumn(format="%.1f"),
+                '3Y %': st.column_config.NumberColumn(format="%.1f"),
+                '5Y %': st.column_config.NumberColumn(format="%.1f"),
+                'Avg %': st.column_config.NumberColumn(format="%.1f"),
+                'Std Dev': st.column_config.NumberColumn(format="%.1f"),
+                'Score': st.column_config.NumberColumn(format="%.1f"),
+            },
+        )
+
+        # Score breakdown selector
+        fund_names = [f['schemeName'].split(' -')[0].split(' Direct')[0] for f in filtered]
+        selected_fund_name = st.selectbox(
+            "View score breakdown for:",
+            [""] + fund_names,
+            format_func=lambda x: "Select a fund..." if x == "" else x,
+            key="ranking_breakdown_select",
+        )
+        if selected_fund_name:
+            idx = fund_names.index(selected_fund_name)
+            fund_link(filtered[idx], years=rolling_years, key_prefix=f"rk_{filtered[idx]['schemeCode']}")
 
         # --- Download ---
         download_df = pd.DataFrame([{
@@ -1296,9 +1318,10 @@ with tab_sip_sim:
 
         # --- Hero metrics ---
         st.markdown(f"### {fund_name}")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2 = st.columns(2)
         c1.metric("Total Invested", f"₹{s['total_invested']:,.0f}")
         c2.metric("Current Value", f"₹{s['final_value']:,.0f}")
+        c3, c4 = st.columns(2)
         c3.metric("Wealth Gained", f"₹{s['wealth_gained']:,.0f}",
                    delta=f"{s['absolute_return']:+.1f}%")
         c4.metric("SIP XIRR", f"{s['xirr']}%" if s['xirr'] is not None else "—")
@@ -1474,37 +1497,34 @@ with tab_portfolio:
 
         # Portfolio summary table
         st.markdown("### Your Portfolio")
-        has_invested = any(f.get('amount') for f in portfolio)
-        has_current = any(f.get('current') for f in portfolio)
-
-        col_spec = [3, 2, 1, 1, 1, 1]
-        headers = ['Fund Name', 'Category', 'Avg %', 'Std Dev', '+ve %', 'Score']
-        if has_invested:
-            col_spec.append(1.3)
-            headers.append('Invested ₹')
-        if has_current:
-            col_spec.append(1.3)
-            headers.append('Current ₹')
-
-        hcols = st.columns(col_spec)
-        for i, h in enumerate(headers):
-            hcols[i].markdown(f"**{h}**")
-
+        port_rows = []
         for f in portfolio:
-            cols = st.columns(col_spec)
-            with cols[0]:
-                fund_link(f, years=portfolio_years, key_prefix=f"pf_{f['schemeCode']}")
-            cols[1].write(f.get('fineCategory', f['category']))
-            cols[2].write(f"{f['avgReturn']}%")
-            cols[3].write(f"{f['stdDev']}")
-            cols[4].write(f"{f['positivePercentage']}%")
-            cols[5].write(f"**{f['robustnessScore']}**")
-            ci = 6
-            if has_invested:
-                cols[ci].write(f"₹{f['amount']:,.0f}" if f.get('amount') else "—")
-                ci += 1
-            if has_current:
-                cols[ci].write(f"₹{f['current']:,.0f}" if f.get('current') else "—")
+            row = {
+                'Fund Name': f['schemeName'].split(' -')[0].split(' Direct')[0],
+                'Category': f.get('fineCategory', f['category']),
+                'Avg %': f['avgReturn'],
+                'Std Dev': f['stdDev'],
+                '+ve %': f['positivePercentage'],
+                'Score': f['robustnessScore'],
+            }
+            if f.get('amount'):
+                row['Invested ₹'] = f"{f['amount']:,.0f}"
+            if f.get('current'):
+                row['Current ₹'] = f"{f['current']:,.0f}"
+            port_rows.append(row)
+        st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True)
+
+        # Score breakdown selector
+        port_fund_names = [f['schemeName'].split(' -')[0].split(' Direct')[0] for f in portfolio]
+        selected_port_fund = st.selectbox(
+            "View score breakdown for:",
+            [""] + port_fund_names,
+            format_func=lambda x: "Select a fund..." if x == "" else x,
+            key="portfolio_breakdown_select",
+        )
+        if selected_port_fund:
+            pidx = port_fund_names.index(selected_port_fund)
+            fund_link(portfolio[pidx], years=portfolio_years, key_prefix=f"pf_{portfolio[pidx]['schemeCode']}")
 
         # Load rankings for comparison — index by both broad and fine category
         rankings = load_all_rankings(years=portfolio_years)
@@ -1647,10 +1667,8 @@ with tab_portfolio:
                     alts = [f for f in cat_funds[1:4] if f['schemeCode'] != fund['schemeCode']]
                     if alts:
                         st.caption(f"Other strong options in {cat}:")
-                        alt_cols = st.columns(len(alts))
-                        for ai, af in enumerate(alts):
-                            with alt_cols[ai]:
-                                fund_link(af, years=portfolio_years, key_prefix=f"alt_{fund['schemeCode']}_{af['schemeCode']}")
+                        for af in alts:
+                            fund_link(af, years=portfolio_years, key_prefix=f"alt_{fund['schemeCode']}_{af['schemeCode']}")
 
         # --- Portfolio Health Score ---
         if health_scores:
@@ -1726,21 +1744,17 @@ with tab_portfolio:
                     # Show all held funds ranked
                     st.markdown("**Your holdings in this category (ranked by robustness):**")
                     for i, f in enumerate(funds_sorted):
+                        fname = f['schemeName'].split(' -')[0].split(' Direct')[0]
                         amt_str = f" · ₹{f['current']:,.0f}" if f.get('current') else (f" · ₹{f['amount']:,.0f}" if f.get('amount') else "")
-                        action = "→ **Keep**" if i < keep_count else "→ **Consider exiting**"
+                        action = "Keep" if i < keep_count else "Consider exiting"
                         icon = "✅" if i < keep_count else "🔻"
-                        row_cols = st.columns([0.3, 3, 4])
-                        row_cols[0].write(f"{icon}")
-                        with row_cols[1]:
-                            fund_link(f, years=portfolio_years, key_prefix=f"con_{cat}_{f['schemeCode']}")
-                        row_cols[2].write(f"Score: {f['robustnessScore']}, Avg: {f['avgReturn']}%{amt_str} {action}")
+                        st.markdown(f"{icon} **{fname}** — Score: {f['robustnessScore']}, Avg: {f['avgReturn']}%{amt_str} → *{action}*")
+                        fund_link(f, years=portfolio_years, key_prefix=f"con_{cat}_{f['schemeCode']}")
 
                     if upgrade_to:
-                        up_cols = st.columns([0.3, 3, 4])
-                        up_cols[0].write("💡")
-                        with up_cols[1]:
-                            fund_link(upgrade_to, years=portfolio_years, key_prefix=f"up_{cat}_{upgrade_to['schemeCode']}")
-                        up_cols[2].write(f"**Even better:** Consolidate into this fund (Score: {upgrade_to['robustnessScore']}, Avg: {upgrade_to['avgReturn']}%) — ranked #1 in {cat}.")
+                        up_name = upgrade_to['schemeName'].split(' -')[0].split(' Direct')[0]
+                        st.markdown(f"💡 **Even better:** Consolidate into **{up_name}** (Score: {upgrade_to['robustnessScore']}, Avg: {upgrade_to['avgReturn']}%) — ranked #1 in {cat}.")
+                        fund_link(upgrade_to, years=portfolio_years, key_prefix=f"up_{cat}_{upgrade_to['schemeCode']}")
 
                     # Rationale
                     st.markdown("---")
@@ -1831,10 +1845,9 @@ with tab_portfolio:
                     if len(rankings_by_cat.get(cat, [])) > 1:
                         st.markdown("**Other top funds in this category:**")
                         for i, f in enumerate(rankings_by_cat[cat][1:3]):
-                            rc = st.columns([3, 4])
-                            with rc[0]:
-                                fund_link(f, years=portfolio_years, key_prefix=f"miss_{cat}_{f['schemeCode']}")
-                            rc[1].write(f"Avg: {f['avgReturn']}%, Robustness: {f['robustnessScore']}")
+                            fname = f['schemeName'].split(' -')[0].split(' Direct')[0]
+                            st.markdown(f"{i+2}. **{fname}** — Avg: {f['avgReturn']}%, Score: {f['robustnessScore']}")
+                            fund_link(f, years=portfolio_years, key_prefix=f"miss_{cat}_{f['schemeCode']}")
 
                     if opp['beats_portfolio']:
                         ret_uplift = round(opp['cat_avg_ret'] - portfolio_avg_ret, 1)
