@@ -572,76 +572,39 @@ def match_fund_to_scheme(fund_name, all_schemes):
     return (best_match, round(best_score * 100)) if best_score >= 0.35 else (None, 0)
 
 
-# --- Score Breakdown ---
+# --- Score Breakdown Popover ---
 
-def render_score_breakdown(fund, years=5):
-    """Render a detailed, transparent robustness score breakdown for a fund."""
+def fund_link(fund, years=5, key_prefix="fl"):
+    """Render a fund name as a clickable popover that shows the score breakdown."""
     name = fund['schemeName'].split(' -')[0].split(' Direct')[0]
     avg = fund['avgReturn']
     pos_pct = fund['positivePercentage']
     std = fund['stdDev']
     total = fund['totalPeriods']
     conf = fund.get('confidence', 100)
-
     raw_score = (avg * (pos_pct / 100)) / (1 + std / 10)
     final_score = raw_score * (conf / 100)
 
-    st.markdown("---")
-    st.markdown(f"#### Score Breakdown: {name}")
-
-    col_formula, col_chart = st.columns([2, 3])
-
-    with col_formula:
-        st.markdown(f"**Raw Metrics** — {total:,} rolling {years}-year windows")
+    with st.popover(name, use_container_width=True):
+        st.markdown(f"**{name}**")
+        st.caption(f"{fund.get('fineCategory', fund.get('category', ''))} · {fund.get('fundHouse', '').split(' Mutual')[0]}")
         st.markdown(
             f"| Metric | Value |\n|---|---|\n"
             f"| Average Return | {avg}% |\n"
-            f"| Min Return | {fund['minReturn']}% |\n"
-            f"| Max Return | {fund['maxReturn']}% |\n"
+            f"| Min / Max Return | {fund['minReturn']}% / {fund['maxReturn']}% |\n"
             f"| Std Deviation | {std} |\n"
-            f"| Positive Periods | {pos_pct}% |"
+            f"| Positive Periods | {pos_pct}% |\n"
+            f"| Data Points | {total:,} |\n"
+            f"| Confidence | {conf}% |"
         )
-        st.markdown("**Robustness Score Calculation**")
+        st.markdown("**Score Calculation**")
         st.code(
-            f"Raw Score  = (Avg × Positive%) / (1 + StdDev/10)\n"
-            f"           = ({avg} × {pos_pct / 100:.3f}) / (1 + {std}/10)\n"
-            f"           = {avg * pos_pct / 100:.2f} / {1 + std / 10:.3f}\n"
-            f"           = {raw_score:.2f}\n"
-            f"\n"
-            f"Confidence = min(1, {total:,} / 1,500) = {conf}%\n"
-            f"\n"
-            f"Final Score = {raw_score:.2f} × {conf / 100:.2f} = {final_score:.2f}",
+            f"Raw   = ({avg} × {pos_pct / 100:.2f}) / (1 + {std}/10)\n"
+            f"      = {avg * pos_pct / 100:.2f} / {1 + std / 10:.2f} = {raw_score:.2f}\n"
+            f"Final = {raw_score:.2f} × {conf / 100:.0%} confidence\n"
+            f"      = {final_score:.2f}",
             language=None,
         )
-
-    with col_chart:
-        data = get_fund_rolling_returns(fund['schemeCode'], years=years)
-        if data and data.get('rollingReturns'):
-            returns_data = data['rollingReturns']
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=[d['date'] for d in returns_data],
-                y=[d['return'] for d in returns_data],
-                mode='lines',
-                line=dict(color='#1a237e', width=1.5),
-                fill='tozeroy',
-                fillcolor='rgba(26,35,126,0.1)',
-                hovertemplate='%{x}<br>%{y:.2f}%<extra></extra>',
-            ))
-            fig.add_hline(y=avg, line_dash="dash", line_color="#c62828",
-                          annotation_text=f"Avg: {avg}%")
-            fig.add_hline(y=0, line_color="gray", line_width=0.5)
-            fig.update_layout(
-                title=f"{years}-Year Rolling Returns",
-                yaxis_title='CAGR (%)',
-                height=350,
-                margin=dict(t=40, b=20, l=40, r=20),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption(
-                f"Each point = the {years}-year CAGR ending on that date. "
-                f"The spread drives the avg, std dev, and positive % above."
-            )
 
 
 # --- Session State ---
@@ -661,6 +624,27 @@ st.markdown(
     "<p style='text-align:center;color:#666;'>Analyze and compare rolling returns of Indian mutual funds</p>",
     unsafe_allow_html=True,
 )
+
+# Style popover buttons as blue hyperlinks
+st.markdown("""
+<style>
+[data-testid="stPopover"] > div > button {
+    background: none !important;
+    border: none !important;
+    color: #1a73e8 !important;
+    text-decoration: underline !important;
+    padding: 0 !important;
+    min-height: auto !important;
+    cursor: pointer !important;
+}
+[data-testid="stPopover"] > div > button:hover {
+    color: #0d47a1 !important;
+}
+[data-testid="stPopover"] > div > button p {
+    color: #1a73e8 !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # --- Tabs ---
 tab_analyzer, tab_rankings, tab_portfolio, tab_pms, tab_methodology = st.tabs(["🔍 Analyzer", "🏆 Fund Rankings", "📋 Portfolio Review", "💎 PMS & AIF", "📐 Methodology"])
@@ -819,42 +803,40 @@ with tab_rankings:
         c3.metric("Strongest Category", best_cat)
         c4.metric("Most Consistent", most_consistent['schemeName'].split(' -')[0].split(' Direct')[0][:22])
 
-        # --- Rankings Table ---
-        df = pd.DataFrame(filtered)
-        df.insert(0, 'Rank', range(1, len(df) + 1))
-        df['Fund Name'] = df['schemeName'].apply(lambda x: x.split(' -')[0].split(' Direct')[0])
-        df['Fund House'] = df['fundHouse'].apply(lambda x: x.split(' Mutual')[0])
+        # --- Rankings Table (clickable fund names) ---
+        hcols = st.columns([0.5, 3, 2, 1.5, 1, 1, 1, 1, 1])
+        for col, label in zip(hcols, ['#', 'Fund Name', 'Fund House', 'Category', 'Avg %', 'Min %', 'Std Dev', 'Data Pts', 'Score']):
+            col.markdown(f"**{label}**")
 
-        display_df = df[['Rank', 'Fund Name', 'Fund House', 'category', 'avgReturn', 'minReturn',
-                         'maxReturn', 'stdDev', 'positivePercentage', 'totalPeriods', 'confidence', 'robustnessScore']].copy()
-        display_df.columns = ['#', 'Fund Name', 'Fund House', 'Category', 'Avg Return %',
-                              'Min %', 'Max %', 'Std Dev', 'Positive %', 'Data Pts', 'Confidence %', 'Robustness']
-
-        st.caption("Click any row to see how its robustness score is calculated.")
-        ranking_event = st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True,
-            selection_mode="single-row",
-            on_select="rerun",
-            column_config={
-                '#': st.column_config.NumberColumn(width="small"),
-                'Avg Return %': st.column_config.NumberColumn(format="%.1f"),
-                'Min %': st.column_config.NumberColumn(format="%.1f"),
-                'Max %': st.column_config.NumberColumn(format="%.1f"),
-                'Std Dev': st.column_config.NumberColumn(format="%.1f"),
-                'Positive %': st.column_config.NumberColumn(format="%.0f"),
-                'Data Pts': st.column_config.NumberColumn(format="%d"),
-                'Confidence %': st.column_config.NumberColumn(format="%d"),
-                'Robustness': st.column_config.NumberColumn(format="%.1f"),
-            },
-        )
-
-        if ranking_event.selection.rows:
-            render_score_breakdown(filtered[ranking_event.selection.rows[0]], years=rolling_years)
+        for rank, fund in enumerate(filtered, 1):
+            cols = st.columns([0.5, 3, 2, 1.5, 1, 1, 1, 1, 1])
+            cols[0].write(rank)
+            with cols[1]:
+                fund_link(fund, years=rolling_years, key_prefix=f"rk_{fund['schemeCode']}")
+            cols[2].write(fund.get('fundHouse', '').split(' Mutual')[0])
+            cols[3].write(fund['category'])
+            cols[4].write(f"{fund['avgReturn']}%")
+            cols[5].write(f"{fund['minReturn']}%")
+            cols[6].write(f"{fund['stdDev']}")
+            cols[7].write(f"{fund['totalPeriods']:,}")
+            cols[8].write(f"**{fund['robustnessScore']}**")
 
         # --- Download ---
-        csv_data = display_df.to_csv(index=False)
+        download_df = pd.DataFrame([{
+            '#': i + 1,
+            'Fund Name': f['schemeName'].split(' -')[0].split(' Direct')[0],
+            'Fund House': f.get('fundHouse', '').split(' Mutual')[0],
+            'Category': f['category'],
+            'Avg Return %': f['avgReturn'],
+            'Min %': f['minReturn'],
+            'Max %': f['maxReturn'],
+            'Std Dev': f['stdDev'],
+            'Positive %': f['positivePercentage'],
+            'Data Pts': f['totalPeriods'],
+            'Confidence %': f.get('confidence', 100),
+            'Robustness': f['robustnessScore'],
+        } for i, f in enumerate(filtered)])
+        csv_data = download_df.to_csv(index=False)
         st.download_button(
             "📥 Download Rankings CSV",
             csv_data,
@@ -948,29 +930,37 @@ with tab_portfolio:
 
         # Portfolio summary table
         st.markdown("### Your Portfolio")
-        port_rows = []
-        for f in portfolio:
-            row = {
-                'Fund Name': f['schemeName'].split(' -')[0].split(' Direct')[0],
-                'Category': f.get('fineCategory', f['category']),
-                'Avg Return %': f['avgReturn'],
-                'Min %': f['minReturn'],
-                'Std Dev': f['stdDev'],
-                'Positive %': f['positivePercentage'],
-                'Robustness': f['robustnessScore'],
-            }
-            if f.get('amount'):
-                row['Invested (₹)'] = f"{f['amount']:,.0f}"
-            if f.get('current'):
-                row['Current (₹)'] = f"{f['current']:,.0f}"
-            if f.get('match_confidence'):
-                row['Match %'] = f"{f['match_confidence']}%"
-            port_rows.append(row)
-        st.caption("Click any row to see how its robustness score is calculated.")
-        portfolio_event = st.dataframe(pd.DataFrame(port_rows), use_container_width=True, hide_index=True, selection_mode="single-row", on_select="rerun")
+        has_invested = any(f.get('amount') for f in portfolio)
+        has_current = any(f.get('current') for f in portfolio)
 
-        if portfolio_event.selection.rows:
-            render_score_breakdown(portfolio[portfolio_event.selection.rows[0]], years=portfolio_years)
+        col_spec = [3, 2, 1, 1, 1, 1]
+        headers = ['Fund Name', 'Category', 'Avg %', 'Std Dev', '+ve %', 'Score']
+        if has_invested:
+            col_spec.append(1.3)
+            headers.append('Invested ₹')
+        if has_current:
+            col_spec.append(1.3)
+            headers.append('Current ₹')
+
+        hcols = st.columns(col_spec)
+        for i, h in enumerate(headers):
+            hcols[i].markdown(f"**{h}**")
+
+        for f in portfolio:
+            cols = st.columns(col_spec)
+            with cols[0]:
+                fund_link(f, years=portfolio_years, key_prefix=f"pf_{f['schemeCode']}")
+            cols[1].write(f.get('fineCategory', f['category']))
+            cols[2].write(f"{f['avgReturn']}%")
+            cols[3].write(f"{f['stdDev']}")
+            cols[4].write(f"{f['positivePercentage']}%")
+            cols[5].write(f"**{f['robustnessScore']}**")
+            ci = 6
+            if has_invested:
+                cols[ci].write(f"₹{f['amount']:,.0f}" if f.get('amount') else "—")
+                ci += 1
+            if has_current:
+                cols[ci].write(f"₹{f['current']:,.0f}" if f.get('current') else "—")
 
         # Load rankings for comparison — index by both broad and fine category
         rankings = load_all_rankings(years=portfolio_years)
@@ -1042,20 +1032,17 @@ with tab_portfolio:
 
                     with col1:
                         st.markdown(f"##### Your Fund")
-                        st.markdown(f"**{fund_name}**")
+                        fund_link(fund, years=portfolio_years, key_prefix=f"sw_your_{fund['schemeCode']}")
                         st.caption(f"{fine_cat}")
                         st.metric("Avg Return", f"{fund['avgReturn']}%")
                         st.metric("Min Return", f"{fund['minReturn']}%")
                         st.metric("Std Dev", f"{fund['stdDev']}")
                         st.metric("Positive Periods", f"{fund['positivePercentage']}%")
                         st.metric("Robustness Score", f"{fund['robustnessScore']}")
-                        _raw = (fund['avgReturn'] * fund['positivePercentage'] / 100) / (1 + fund['stdDev'] / 10)
-                        _conf = fund.get('confidence', 100)
-                        st.caption(f"= ({fund['avgReturn']} × {fund['positivePercentage']/100:.2f}) / (1+{fund['stdDev']}/10) × {_conf}% conf")
 
                     with col2:
                         st.markdown(f"##### Recommended (#{1} in {fine_cat})")
-                        st.markdown(f"**{top_name}**")
+                        fund_link(top_fund, years=portfolio_years, key_prefix=f"sw_rec_{top_fund['schemeCode']}")
                         st.caption(f"{top_fund['fundHouse'].split(' Mutual')[0]}")
                         ret_delta = round(top_fund['avgReturn'] - fund['avgReturn'], 1)
                         st.metric("Avg Return", f"{top_fund['avgReturn']}%", delta=f"{ret_delta:+.1f}%")
@@ -1067,9 +1054,6 @@ with tab_portfolio:
                         st.metric("Positive Periods", f"{top_fund['positivePercentage']}%", delta=f"{pos_delta:+.1f}%")
                         rob_delta = round(top_fund['robustnessScore'] - fund['robustnessScore'], 1)
                         st.metric("Robustness Score", f"{top_fund['robustnessScore']}", delta=f"{rob_delta:+.1f}")
-                        _raw_t = (top_fund['avgReturn'] * top_fund['positivePercentage'] / 100) / (1 + top_fund['stdDev'] / 10)
-                        _conf_t = top_fund.get('confidence', 100)
-                        st.caption(f"= ({top_fund['avgReturn']} × {top_fund['positivePercentage']/100:.2f}) / (1+{top_fund['stdDev']}/10) × {_conf_t}% conf")
 
                     # Rationale
                     st.markdown("---")
@@ -1095,11 +1079,11 @@ with tab_portfolio:
                     # Alternatives
                     alts = [f for f in cat_funds[1:4] if f['schemeCode'] != fund['schemeCode']]
                     if alts:
-                        alt_text = ", ".join(
-                            f"{f['schemeName'].split(' -')[0].split(' Direct')[0]} (Score: {f['robustnessScore']})"
-                            for f in alts
-                        )
-                        st.caption(f"Other strong options in {cat}: {alt_text}")
+                        st.caption(f"Other strong options in {cat}:")
+                        alt_cols = st.columns(len(alts))
+                        for ai, af in enumerate(alts):
+                            with alt_cols[ai]:
+                                fund_link(af, years=portfolio_years, key_prefix=f"alt_{fund['schemeCode']}_{af['schemeCode']}")
 
         # --- Portfolio Health Score ---
         if health_scores:
@@ -1175,16 +1159,21 @@ with tab_portfolio:
                     # Show all held funds ranked
                     st.markdown("**Your holdings in this category (ranked by robustness):**")
                     for i, f in enumerate(funds_sorted):
-                        fname = f['schemeName'].split(' -')[0].split(' Direct')[0]
                         amt_str = f" · ₹{f['current']:,.0f}" if f.get('current') else (f" · ₹{f['amount']:,.0f}" if f.get('amount') else "")
-                        if i < keep_count:
-                            st.markdown(f"✅ **{i+1}. {fname}** — Robustness: {f['robustnessScore']}, Avg: {f['avgReturn']}%{amt_str} → **Keep**")
-                        else:
-                            st.markdown(f"🔻 {i+1}. {fname} — Robustness: {f['robustnessScore']}, Avg: {f['avgReturn']}%{amt_str} → **Consider exiting**")
+                        action = "→ **Keep**" if i < keep_count else "→ **Consider exiting**"
+                        icon = "✅" if i < keep_count else "🔻"
+                        row_cols = st.columns([0.3, 3, 4])
+                        row_cols[0].write(f"{icon}")
+                        with row_cols[1]:
+                            fund_link(f, years=portfolio_years, key_prefix=f"con_{cat}_{f['schemeCode']}")
+                        row_cols[2].write(f"Score: {f['robustnessScore']}, Avg: {f['avgReturn']}%{amt_str} {action}")
 
                     if upgrade_to:
-                        up_name = upgrade_to['schemeName'].split(' -')[0].split(' Direct')[0]
-                        st.markdown(f"💡 **Even better:** Consolidate all into **{up_name}** (Robustness: {upgrade_to['robustnessScore']}, Avg: {upgrade_to['avgReturn']}%) — ranked #1 in {cat}.")
+                        up_cols = st.columns([0.3, 3, 4])
+                        up_cols[0].write("💡")
+                        with up_cols[1]:
+                            fund_link(upgrade_to, years=portfolio_years, key_prefix=f"up_{cat}_{upgrade_to['schemeCode']}")
+                        up_cols[2].write(f"**Even better:** Consolidate into this fund (Score: {upgrade_to['robustnessScore']}, Avg: {upgrade_to['avgReturn']}%) — ranked #1 in {cat}.")
 
                     # Rationale
                     st.markdown("---")
@@ -1262,6 +1251,8 @@ with tab_portfolio:
 
                 with st.expander(f"{icon} **{cat}** — Top pick: {top_name}"):
                     st.markdown(badge)
+                    st.markdown("**Top pick:**")
+                    fund_link(top, years=portfolio_years, key_prefix=f"miss_top_{cat}")
                     c1, c2, c3, c4, c5 = st.columns(5)
                     c1.metric("Avg Return", f"{top['avgReturn']}%")
                     c2.metric("Min Return", f"{top['minReturn']}%")
@@ -1271,10 +1262,12 @@ with tab_portfolio:
 
                     # Show top 3 in category
                     if len(rankings_by_cat.get(cat, [])) > 1:
-                        st.markdown("**Top funds in this category:**")
-                        for i, f in enumerate(rankings_by_cat[cat][:3]):
-                            fname = f['schemeName'].split(' -')[0].split(' Direct')[0]
-                            st.markdown(f"{i+1}. **{fname}** — Avg: {f['avgReturn']}%, Robustness: {f['robustnessScore']}")
+                        st.markdown("**Other top funds in this category:**")
+                        for i, f in enumerate(rankings_by_cat[cat][1:3]):
+                            rc = st.columns([3, 4])
+                            with rc[0]:
+                                fund_link(f, years=portfolio_years, key_prefix=f"miss_{cat}_{f['schemeCode']}")
+                            rc[1].write(f"Avg: {f['avgReturn']}%, Robustness: {f['robustnessScore']}")
 
                     if opp['beats_portfolio']:
                         ret_uplift = round(opp['cat_avg_ret'] - portfolio_avg_ret, 1)
