@@ -520,6 +520,9 @@ def get_fund_rankings():
 
             # Robustness score: rewards high avg, consistency, downside protection
             robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+            # Confidence discount: penalize funds with fewer data points
+            confidence = min(1.0, len(returns_values) / 1500)
+            robustness *= confidence
 
             return {
                 'schemeCode': scheme_code,
@@ -533,6 +536,7 @@ def get_fund_rankings():
                 'stdDev': round(std, 2),
                 'positivePercentage': round(pos_pct, 1),
                 'totalPeriods': len(returns_values),
+                'confidence': round(confidence * 100),
                 'robustnessScore': round(robustness, 2),
             }
         except Exception as e:

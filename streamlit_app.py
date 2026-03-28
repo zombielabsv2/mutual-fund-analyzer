@@ -307,6 +307,10 @@ def load_all_rankings(years=5):
             mx = max(returns_values)
             pos_pct = len([r for r in returns_values if r > 0]) / len(returns_values) * 100
             robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+            # Confidence discount: penalize funds with fewer data points
+            # ~1500 points ≈ 6+ years of rolling windows, which spans diverse market regimes
+            confidence = min(1.0, len(returns_values) / 1500)
+            robustness *= confidence
             scheme_name = meta.get('scheme_name', 'Unknown')
             scheme_cat = meta.get('scheme_category', '')
             return {
@@ -321,6 +325,7 @@ def load_all_rankings(years=5):
                 'stdDev': round(std, 2),
                 'positivePercentage': round(pos_pct, 1),
                 'totalPeriods': len(returns_values),
+                'confidence': round(confidence * 100),
                 'robustnessScore': round(robustness, 2),
             }
         except Exception:
@@ -359,6 +364,8 @@ def analyze_portfolio_fund(scheme_code):
         mx = max(returns_values)
         pos_pct = len([r for r in returns_values if r > 0]) / len(returns_values) * 100
         robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+        confidence = min(1.0, len(returns_values) / 1500)
+        robustness *= confidence
         scheme_name = meta.get('scheme_name', 'Unknown')
         scheme_cat = meta.get('scheme_category', '')
         return {
@@ -373,6 +380,7 @@ def analyze_portfolio_fund(scheme_code):
             'stdDev': round(std, 2),
             'positivePercentage': round(pos_pct, 1),
             'totalPeriods': len(returns_values),
+            'confidence': round(confidence * 100),
             'robustnessScore': round(robustness, 2),
         }
     except Exception:
@@ -746,9 +754,9 @@ with tab_rankings:
         df['Fund House'] = df['fundHouse'].apply(lambda x: x.split(' Mutual')[0])
 
         display_df = df[['Rank', 'Fund Name', 'Fund House', 'category', 'avgReturn', 'minReturn',
-                         'maxReturn', 'stdDev', 'positivePercentage', 'robustnessScore']].copy()
+                         'maxReturn', 'stdDev', 'positivePercentage', 'totalPeriods', 'confidence', 'robustnessScore']].copy()
         display_df.columns = ['#', 'Fund Name', 'Fund House', 'Category', 'Avg Return %',
-                              'Min %', 'Max %', 'Std Dev', 'Positive %', 'Robustness']
+                              'Min %', 'Max %', 'Std Dev', 'Positive %', 'Data Pts', 'Confidence %', 'Robustness']
 
         st.dataframe(
             display_df,
@@ -761,6 +769,8 @@ with tab_rankings:
                 'Max %': st.column_config.NumberColumn(format="%.1f"),
                 'Std Dev': st.column_config.NumberColumn(format="%.1f"),
                 'Positive %': st.column_config.NumberColumn(format="%.0f"),
+                'Data Pts': st.column_config.NumberColumn(format="%d"),
+                'Confidence %': st.column_config.NumberColumn(format="%d"),
                 'Robustness': st.column_config.NumberColumn(format="%.1f"),
             },
         )
@@ -1484,12 +1494,19 @@ This is computed for **every trading day** where a matching NAV exists ~5 years 
 
 ### 4. Robustness Score
 
-> **Score = (Avg Return × Positive%) / (1 + StdDev / 10)**
+> **Raw Score = (Avg Return × Positive%) / (1 + StdDev / 10)**
+>
+> **Confidence = min(1, Data Points / 1500)**
+>
+> **Final Robustness Score = Raw Score × Confidence**
 
 This rewards:
 - **High average returns** — wealth creation over time
 - **High positive period %** — rarely loses money over 5-year windows
 - **Low standard deviation** — consistent, not wildly swinging
+- **More data points** — a fund that has been through multiple market cycles (bull runs, corrections, crashes) gets full credit, while a newer fund with limited history is discounted
+
+**Why the confidence adjustment?** A fund launched 5.5 years ago would have only ~400 rolling 5-year data points, all starting from a similar market period. If that period happened to be a market low (e.g., COVID crash), every window looks great — but that tells you about the market timing, not the fund quality. A fund with 2,000+ data points spanning 10+ years has proven itself across diverse market regimes. The confidence factor ensures newer funds must earn their ranking over time.
 
 A fund with 15% avg but wild swings will score *lower* than a fund with 13% avg that is rock-solid consistent. The score captures **reliability of wealth creation**.
 
@@ -1506,6 +1523,7 @@ Fund categorization uses the **SEBI mutual fund categorization framework** (Octo
 ### 6. Limitations
 
 - **Survivorship bias** — Only active funds are analyzed. Merged/closed funds (likely poor performers) are excluded.
+- **Inception date bias** — Funds launched just before a bull market will have inflated rolling returns. The confidence discount mitigates this but does not eliminate it — check the "Data Pts" and "Confidence %" columns when evaluating newer funds.
 - **Past performance** — Rolling returns are backward-looking. High robustness does not guarantee future returns.
 - **Fund manager changes** — Track record may reflect a previous manager's skill.
 - **AUM & liquidity** — Not accounted for; can impact future performance (especially small cap).
