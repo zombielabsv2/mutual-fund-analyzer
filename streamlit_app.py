@@ -306,11 +306,10 @@ def load_all_rankings(years=5):
             mn = min(returns_values)
             mx = max(returns_values)
             pos_pct = len([r for r in returns_values if r > 0]) / len(returns_values) * 100
-            robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
-            # Confidence discount: penalize funds with fewer data points
-            # ~1500 points ≈ 6+ years of rolling windows, which spans diverse market regimes
-            confidence = min(1.0, len(returns_values) / 1500)
-            robustness *= confidence
+            raw_robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+            # Confidence discount: softer sqrt curve so newer funds aren't over-penalized
+            confidence = min(1.0, math.sqrt(len(returns_values) / 1500))
+            robustness = raw_robustness * confidence
             scheme_name = meta.get('scheme_name', 'Unknown')
             scheme_cat = meta.get('scheme_category', '')
             return {
@@ -325,6 +324,7 @@ def load_all_rankings(years=5):
                 'stdDev': round(std, 2),
                 'positivePercentage': round(pos_pct, 1),
                 'totalPeriods': len(returns_values),
+                'rawRobustnessScore': round(raw_robustness, 2),
                 'confidence': round(confidence * 100),
                 'robustnessScore': round(robustness, 2),
             }
@@ -363,9 +363,9 @@ def analyze_portfolio_fund(scheme_code, years=5):
         mn = min(returns_values)
         mx = max(returns_values)
         pos_pct = len([r for r in returns_values if r > 0]) / len(returns_values) * 100
-        robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
-        confidence = min(1.0, len(returns_values) / 1500)
-        robustness *= confidence
+        raw_robustness = (avg * (pos_pct / 100)) / (1 + std / 10)
+        confidence = min(1.0, math.sqrt(len(returns_values) / 1500))
+        robustness = raw_robustness * confidence
         scheme_name = meta.get('scheme_name', 'Unknown')
         scheme_cat = meta.get('scheme_category', '')
         return {
@@ -380,6 +380,7 @@ def analyze_portfolio_fund(scheme_code, years=5):
             'stdDev': round(std, 2),
             'positivePercentage': round(pos_pct, 1),
             'totalPeriods': len(returns_values),
+            'rawRobustnessScore': round(raw_robustness, 2),
             'confidence': round(confidence * 100),
             'robustnessScore': round(robustness, 2),
         }
@@ -601,8 +602,8 @@ def fund_link(fund, years=5, key_prefix="fl"):
         st.code(
             f"Raw   = ({avg} × {pos_pct / 100:.2f}) / (1 + {std}/10)\n"
             f"      = {avg * pos_pct / 100:.2f} / {1 + std / 10:.2f} = {raw_score:.2f}\n"
-            f"Final = {raw_score:.2f} × {conf / 100:.0%} confidence\n"
-            f"      = {final_score:.2f}",
+            f"Conf  = sqrt({total:,} / 1500) = {conf}%\n"
+            f"Final = {raw_score:.2f} × {conf / 100:.2f} = {final_score:.2f}",
             language=None,
         )
 
@@ -1014,13 +1015,18 @@ with tab_portfolio:
             health = min(fund['robustnessScore'] / top_fund['robustnessScore'], 1.0) if top_fund['robustnessScore'] > 0 else 0
             health_scores.append(health)
 
-            # Only recommend swap if the top fund is actually better
-            is_optimal = (fund_rank and fund_rank <= 3) or top_fund['robustnessScore'] <= fund['robustnessScore']
+            # Only recommend swap if the top fund is genuinely better on raw metrics
+            # (not just benefiting from confidence penalty on the user's fund)
+            fund_raw = fund.get('rawRobustnessScore', fund['robustnessScore'])
+            top_raw = top_fund.get('rawRobustnessScore', top_fund['robustnessScore'])
+            is_optimal = (fund_rank and fund_rank <= 3) or top_fund['robustnessScore'] <= fund['robustnessScore'] or top_raw <= fund_raw
 
             if is_optimal:
                 already_optimal += 1
                 if fund_rank and fund_rank <= 3:
                     st.success(f"**✅ {fund_name}** — Ranked **#{fund_rank} in {cat}**. No change needed. (Robustness: {fund['robustnessScore']})")
+                elif top_raw <= fund_raw and fund.get('confidence', 100) < 70:
+                    st.info(f"**📊 {fund_name}** — Strong raw metrics (Score: {fund_raw}) but limited history ({fund.get('confidence', 100)}% confidence). Hold and monitor as more data becomes available.")
                 else:
                     st.success(f"**✅ {fund_name}** — Already outperforms the top ranked fund in **{cat}**. (Robustness: {fund['robustnessScore']} vs {top_fund['robustnessScore']})")
             else:
@@ -1581,7 +1587,7 @@ This is computed for **every trading day** where a matching NAV exists ~5 years 
 
 > **Raw Score = (Avg Return × Positive%) / (1 + StdDev / 10)**
 >
-> **Confidence = min(1, Data Points / 1500)**
+> **Confidence = min(1, sqrt(Data Points / 1500))**
 >
 > **Final Robustness Score = Raw Score × Confidence**
 
@@ -1591,7 +1597,7 @@ This rewards:
 - **Low standard deviation** — consistent, not wildly swinging
 - **More data points** — a fund that has been through multiple market cycles (bull runs, corrections, crashes) gets full credit, while a newer fund with limited history is discounted
 
-**Why the confidence adjustment?** A fund launched 5.5 years ago would have only ~400 rolling 5-year data points, all starting from a similar market period. If that period happened to be a market low (e.g., COVID crash), every window looks great — but that tells you about the market timing, not the fund quality. A fund with 2,000+ data points spanning 10+ years has proven itself across diverse market regimes. The confidence factor ensures newer funds must earn their ranking over time.
+**Why the confidence adjustment?** A fund launched 5.5 years ago would have only ~400 rolling 5-year data points, all starting from a similar market period. If that period happened to be a market low (e.g., COVID crash), every window looks great — but that tells you about the market timing, not the fund quality. A fund with 2,000+ data points spanning 10+ years has proven itself across diverse market regimes. The confidence factor uses a square root curve so the discount is gentle — a fund with 400 data points gets ~52% confidence (not a harsh 27%). Swap recommendations also compare raw scores to avoid penalizing your fund for limited history when it's genuinely better on every metric.
 
 A fund with 15% avg but wild swings will score *lower* than a fund with 13% avg that is rock-solid consistent. The score captures **reliability of wealth creation**.
 
