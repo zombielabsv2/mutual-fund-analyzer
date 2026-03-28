@@ -805,20 +805,23 @@ def consolidate_holdings(holdings):
     return list(consolidated.values())
 
 
-@st.cache_data(ttl=3600)
+_schemes_cache = {'data': None, 'time': 0}
+
 def get_all_schemes():
-    """Fetch all mutual fund schemes from mfapi.in."""
+    """Fetch all mutual fund schemes from mfapi.in. Cached 1hr, never caches failures."""
+    if _schemes_cache['data'] and (time.time() - _schemes_cache['time']) < 3600:
+        return _schemes_cache['data']
     try:
         response = requests.get(MFAPI_BASE_URL, timeout=30)
         response.raise_for_status()
         data = response.json()
-        if not data:
-            get_all_schemes.clear()
-        return data
+        if data:
+            _schemes_cache['data'] = data
+            _schemes_cache['time'] = time.time()
+            return data
+        return _schemes_cache['data'] or []
     except Exception:
-        # Don't cache failures — clear so next call retries
-        get_all_schemes.clear()
-        return []
+        return _schemes_cache['data'] or []
 
 
 def match_fund_to_scheme(fund_name, all_schemes):
