@@ -13,6 +13,7 @@ import pdfplumber
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
+import time
 
 # --- Page Config ---
 st.set_page_config(
