@@ -705,7 +705,7 @@ with tab_analyzer:
 with tab_rankings:
     col_period, col_top, col_spacer = st.columns([2, 2, 6])
     with col_period:
-        rolling_years = st.selectbox("Rolling Period", [3, 5], index=1, key="rolling_years", format_func=lambda x: f"{x}-Year Rolling")
+        rolling_years = st.selectbox("Rolling Period", [3, 5, 10], index=1, key="rolling_years", format_func=lambda x: f"{x}-Year Rolling")
     with col_top:
         top_n = st.selectbox("Show", [10, 20, 30, 50, 100], index=0, key="top_n_select")
 
